@@ -84,7 +84,7 @@ class ExcelUploadView(APIView):
                     profile_id=row['profile_id'],
                     social_network=row['social_network'],
                     video_url=row['video_url'],
-                    #title=row['title'],
+                    title=row['title'],
                     comment=row['comment'],
                     publish_time=row['publish_time'],
                 ))
@@ -99,7 +99,7 @@ class ExcelUploadView(APIView):
                     profile_id=str(err_data.get('profile_id', '?')),
                     social_network=err_data.get('social_network', '?'),
                     video_url=err_data.get('video_url', ''),
-                    #title=err_data.get('title', 'Ошибка в строке')[:255],
+                    title=str(err_data.get('youtube_title') or err_data.get('comment') or '')[:255],
                     comment=err_data.get('comment', ''),
                     publish_time=datetime.now(), #timezone.now(),
                     status='error',
@@ -156,7 +156,7 @@ class TaskStatusAPIView(APIView):
 
         # Считаем прогресс
         if session.total_tasks > 0:
-            progress = (session.success_tasks + session.error_tasks) / session.total_tasks * 100
+            progress = (session.submitted_tasks + session.success_tasks + session.error_tasks) / session.total_tasks * 100
         else:
             progress = 0
 
@@ -171,8 +171,9 @@ class TaskStatusAPIView(APIView):
             'stats': {
                 'total': session.total_tasks,
                 'success': session.success_tasks,
+                'submitted': session.submitted_tasks,
                 'error': session.error_tasks,
-                'pending': session.total_tasks - session.success_tasks - session.error_tasks
+                'pending': session.total_tasks - session.submitted_tasks - session.success_tasks - session.error_tasks
             }
         })
 

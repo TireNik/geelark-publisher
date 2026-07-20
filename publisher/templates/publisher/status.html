@@ -227,7 +227,7 @@
             color: #c05621;
         }
 
-        .status-downloading, .status-sending {
+        .status-downloading, .status-sending, .status-submitted {
             background: #bee3f8;
             color: #2c5282;
         }
@@ -237,6 +237,13 @@
             font-size: 12px;
             color: #e53e3e;
             word-break: break-word;
+        }
+
+        .task-id {
+            margin-top: 5px;
+            font-size: 11px;
+            color: #718096;
+            word-break: break-all;
         }
 
         .empty-state {
@@ -352,6 +359,10 @@
                     <div class="stat-number">${data.stats.success}</div>
                     <div class="stat-label">✅ Успешно</div>
                 </div>
+                <div class="stat total">
+                    <div class="stat-number">${data.stats.submitted || 0}</div>
+                    <div class="stat-label">📤 Отправлено в GeeLark</div>
+                </div>
                 <div class="stat error">
                     <div class="stat-number">${data.stats.error}</div>
                     <div class="stat-label">❌ Ошибок</div>
@@ -384,12 +395,13 @@
                     <td>${task.id}</td>
                     <td><code>${escapeHtml(task.profile_id)}</code></td>
                     <td>${escapeHtml(task.social_network)}</td>
-                    <td title="${escapeHtml(task.comment || '')}">${escapeHtml((task.comment || '').substring(0, 40))}${(task.comment || '').length > 40 ? '...' : ''}</td>
+                    <td title="${escapeHtml(task.title || task.comment || '')}">${escapeHtml((task.title || task.comment || '').substring(0, 40))}${(task.title || task.comment || '').length > 40 ? '...' : ''}</td>
                     <td>${task.publish_time_formatted || '-'}</td>
                     <td>
                         <span class="status-badge status-${task.status}">
                             ${getStatusIcon(task.status)} ${task.status_display}
                         </span>
+                        ${task.geelark_task_id ? `<div class="task-id">GeeLark ID: ${escapeHtml(task.geelark_task_id)}</div>` : ''}
                     </td>
                     <td class="error-message">${escapeHtml(task.error_message || '')}</td>
                 </tr>
@@ -402,6 +414,7 @@
                 'error': '❌',
                 'downloading': '📥',
                 'sending': '📤',
+                'submitted': '📤',
                 'pending': '⏳'
             };
             return icons[status] || '⏳';

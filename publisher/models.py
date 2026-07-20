@@ -63,9 +63,13 @@ class UploadSession(models.Model):
         return self.tasks.filter(status='error').count() if self.tasks else 0
 
     @property
+    def submitted_tasks(self):
+        return self.tasks.filter(status='submitted').count() if self.tasks else 0
+
+    @property
     def the_tasks_process(self):
         """ Выполненный процесс задач на публикацию """
-        process_tasks = self.tasks.filter(status='pending').count()
+        process_tasks = self.tasks.filter(status__in=['pending', 'processing', 'downloading', 'sending']).count()
         return f'Прогресс задач на публикацию: {process_tasks}/{self.tasks.all().count()}'
 
 
@@ -76,7 +80,7 @@ class PublicationTask(models.Model):
     profile_id = models.CharField(max_length=64, verbose_name='Номер профиля')
     social_network = models.CharField(max_length=32, verbose_name='Соцсеть')
     video_url = models.URLField(verbose_name='Ссылка на видео')
-    title = models.CharField(max_length=255, verbose_name='Название видео')
+    title = models.CharField(max_length=255, blank=True, default='', verbose_name='Название видео')
     comment = models.TextField(verbose_name='Комментарий')
     publish_time = models.DateTimeField(verbose_name='Время публикации')
     status = models.CharField(
@@ -85,12 +89,15 @@ class PublicationTask(models.Model):
             ('pending', 'Ожидает'),
             ('downloading', 'Скачивается видео'),
             ('sending', 'Отправляется в Geelark'),
+            ('submitted', 'Задача отправлена в GeeLark'),
             ('success', 'Успешно'),
             ('error', 'Ошибка'),
         ],
         default='pending'
     )
     error_message = models.TextField(blank=True)
+    geelark_task_id = models.CharField(max_length=128, blank=True, default='')
+    attempt_count = models.PositiveSmallIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     processed_at = models.DateTimeField(null=True, blank=True)
 

@@ -46,13 +46,15 @@ class PublicationTaskSerializer(serializers.ModelSerializer):
             'profile_id',
             'social_network',
             'video_url',
-            #'title',
+            'title',
             'comment',
             'publish_time',
             'publish_time_formatted',
             'status',
             'status_display',
             'error_message',
+            'geelark_task_id',
+            'attempt_count',
             'created_at',
             'processed_at'
         ]

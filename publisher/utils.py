@@ -78,16 +78,18 @@ def session_worker(session_id):
             result = send_to_geelark(
                 profile_id=task.profile_id,
                 video_path=video_path,
-                #title=task.title, Больше без названия
+                title=task.title,
                 comment=task.comment,
                 publish_time=task.publish_time,
                 social_network=task.social_network
             )
             print(f'отправили geelark')
 
-            # 3. Успех
-            task.status = 'success'
-            task.processed_at = datetime.now() #timezone.now()
+            # GeeLark принял задачу, но публикация в социальной сети ещё не подтверждена.
+            task.status = 'submitted'
+            task.geelark_task_id = result['task_id']
+            task.attempt_count += 1
+            task.processed_at = timezone.now()
             print(f'установили статус, сохранили')
             task.save()
             session.save()
@@ -96,7 +98,8 @@ def session_worker(session_id):
             # Ошибка
             task.status = 'error'
             task.error_message = str(e)
-            task.processed_at = datetime.now()
+            task.attempt_count += 1
+            task.processed_at = timezone.now()
             task.save()
             session.save()
 
@@ -153,6 +156,7 @@ def parse_excel_file(file):
         #4: 'title', Больше неактивно
         4: 'comment',
         5: 'publish_time',
+        6: 'youtube_title',
     }
 
     # Проходим по строкам (начинаем с 2, т.к. 1-я строка - заголовки)
@@ -165,10 +169,11 @@ def parse_excel_file(file):
 
         # Парсим все поля
         for col_idx, field_name in column_map.items():
-            value = row[col_idx - 1]
+            # Старые таблицы могут содержать только первые пять колонок.
+            value = row[col_idx - 1] if len(row) >= col_idx else None
 
             # Пропускаем проверку на пустоту для publish_time (обработаем позже рандомом)
-            if field_name == 'publish_time':
+            if field_name in ('publish_time', 'youtube_title'):
                 row_dict[field_name] = value if value is not None else None
                 continue
 
@@ -245,12 +250,25 @@ def parse_excel_file(file):
             })
             continue
 
+        youtube_title = row_dict.get('youtube_title') or comment
+        youtube_title = str(youtube_title).strip()
+        if social_network == 'YouTube' and len(youtube_title) > 100:
+            errors.append({
+                'row': row_idx,
+                'errors': [
+                    f"Заголовок YouTube должен быть не длиннее 100 символов. Получено: {len(youtube_title)}. "
+                    "Укажите короткий заголовок в колонке F."
+                ],
+                'data': row_dict
+            })
+            continue
+
         # Всё ок
         rows_data.append({
             'profile_id': profile_id,
             'social_network': social_network,
             'video_url': video_url,
-            #'title': row_dict['title'], Больше нет названия
+            'title': youtube_title if social_network == 'YouTube' else str(comment).strip()[:255],
             'comment': str(comment).strip(),
             'publish_time': publish_time,
             'raw_row': row_idx,
@@ -518,7 +536,9 @@ def add_publish_task(env_id: str, resource_url: str, schedule_at: int, comment: 
 
     # Для YouTube добавляем comment
     if social_network and social_network.lower() == 'youtube' and comment:
-        task_data["comment"] = comment[:100]
+        if len(comment) > 100:
+            raise ValueError('Заголовок YouTube не может быть длиннее 100 символов.')
+        task_data["comment"] = comment
 
     payload = {
         "taskType": 1,
@@ -548,13 +568,11 @@ def add_tiktok_task(env_id: str, resource_url: str, schedule_at: int, descriptio
     print(f'api url completed')
     trace_id = str(uuid.uuid4()).upper()
     token = settings.GEELARK_TOKEN
-    print(f'token + id = {token}, {trace_id}')
     headers = {
         'Content-Type': 'application/json',
         'traceId': trace_id,
         'Authorization': f'Bearer {token}'
     }
-    print(f'headers? {headers}')
     # Формируем задачу строго по документации
     task_data = {
         "scheduleAt": schedule_at,
@@ -641,7 +659,7 @@ def add_instagram_task(env_id: str, resource_url: str, schedule_at: int, descrip
     return task_id
 
 
-def add_youtube_task(env_id: str, resource_url: str, schedule_at: int, comment: str) -> str:
+def add_youtube_task(env_id: str, resource_url: str, schedule_at: int, title: str) -> str:
     """Создание задачи для YouTube Video"""
     api_url = "https://openapi.geelark.com/open/v1/rpa/task/youtubePubShort"
     trace_id = str(uuid.uuid4()).upper()
@@ -652,7 +670,7 @@ def add_youtube_task(env_id: str, resource_url: str, schedule_at: int, comment: 
         'traceId': trace_id,
         'Authorization': f'Bearer {token}'
     }
-    safe_title = comment if comment and comment.strip() else "Auto publish"
+    safe_title = title if title and title.strip() else "Auto publish"
 
     payload = {
         "scheduleAt": schedule_at,
@@ -691,13 +709,11 @@ def add_youtube_task(env_id: str, resource_url: str, schedule_at: int, comment: 
 #    print(f'api url completed')
 #    trace_id = str(uuid.uuid4()).upper()
 #    token = settings.GEELARK_TOKEN
-#    print(f'token + id = {token}, {trace_id}')
 #    headers = {
 #        'Content-Type': 'application/json',
 #        'traceId': trace_id,
 #        'Authorization': f'Bearer {token}'
 #    }
-#    print(f'headers? {headers}')
 #    # Формируем задачу строго по документации
 #    task_data = {
 #        "scheduleAt": schedule_at,
@@ -735,7 +751,7 @@ def add_youtube_task(env_id: str, resource_url: str, schedule_at: int, comment: 
 #    return task_ids[0]
 
 
-def send_to_geelark(profile_id: str, video_path: str, comment: str, publish_time, social_network: str):
+def send_to_geelark(profile_id: str, video_path: str, title: str, comment: str, publish_time, social_network: str):
     """
     Полный цикл отправки в Geelark
     profile_id - это envId (ID облачного телефона)
@@ -770,19 +786,16 @@ def send_to_geelark(profile_id: str, video_path: str, comment: str, publish_time
             description=comment
         )
     elif social_network.lower() == 'youtube':
-        print(f'Получили данные. ПИШУ ИХ:')
-        print(f'TITLE - {comment}')
-        print(f'EVN ID - {profile_id}')
-        if len(str(comment)) > 100:
-            comment = str(comment)[:99]  # Берём первые 99 символов
-            print(f"⚠️ YouTube: комментарий был сокращён с {len(str(comment))} до 100 символов")
-            #raise ValueError(
-            #    f"YouTube: название видео слишком длинное ({len(str(comment))} > 100 символов). Сократите название до 100 символов.")
+        youtube_title = str(title or '').strip()
+        if not youtube_title:
+            raise ValueError('Для YouTube нужен непустой заголовок.')
+        if len(youtube_title) > 100:
+            raise ValueError(f'Заголовок YouTube слишком длинный: {len(youtube_title)} из 100 символов.')
         task_id = add_youtube_task(
             env_id=profile_id,
             resource_url=urls['resourceUrl'],
             schedule_at=schedule_timestamp,
-            comment=comment,
+            title=youtube_title,
             #description=title
             #description=comment
         )
