@@ -1,0 +1,27 @@
+services:
+  app:
+    build: .
+    container_name: geelark-publisher
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      # Монтируем папки для сохранения данных (чтобы не терять при перезапуске)
+      - ./data:/app/data          # SQLite база
+      - ./media:/app/media        # Загруженные файлы
+      - ./logs:/app/logs          # Логи
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+    command: sh -c "python manage.py migrate --noinput && gunicorn --bind 0.0.0.0:8000 --timeout 600 --workers 2 config.wsgi:application"
+
+  nginx:
+    image: nginx:alpine
+    container_name: geelark-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app

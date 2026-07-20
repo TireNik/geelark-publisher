@@ -1,0 +1,14 @@
+asgiref==3.11.1
+certifi==2026.2.25
+charset-normalizer==3.4.7
+Django==5.2.13
+djangorestframework==3.17.1
+et_xmlfile==2.0.0
+idna==3.11
+openpyxl==3.1.5
+python-decouple==3.8
+requests==2.33.1
+sqlparse==0.5.5
+typing_extensions==4.15.0
+urllib3==2.6.3
+gunicorn==23.0.0
