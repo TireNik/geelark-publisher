@@ -94,13 +94,22 @@ class ExcelUploadView(APIView):
                 err_data = err['data']
                 error_message = '; '.join(err['errors'])
 
+                # В Excel пустые обязательные ячейки приходят как None.
+                # Ошибочная задача всё равно должна быть сохранена, чтобы
+                # пользователь увидел номер строки и причину ошибки, но
+                # поля модели не могут содержать NULL.
+                profile_id = err_data.get('profile_id') or '?'
+                social_network = err_data.get('social_network') or '?'
+                video_url = err_data.get('video_url') or ''
+                comment = err_data.get('comment') or ''
+
                 tasks.append(PublicationTask(
                     session=session,
-                    profile_id=str(err_data.get('profile_id', '?')),
-                    social_network=err_data.get('social_network', '?'),
-                    video_url=err_data.get('video_url', ''),
-                    title=str(err_data.get('youtube_title') or err_data.get('comment') or '')[:255],
-                    comment=err_data.get('comment', ''),
+                    profile_id=str(profile_id),
+                    social_network=str(social_network),
+                    video_url=str(video_url),
+                    title=str(err_data.get('youtube_title') or comment)[:255],
+                    comment=str(comment),
                     publish_time=datetime.now(), #timezone.now(),
                     status='error',
                     error_message=error_message
