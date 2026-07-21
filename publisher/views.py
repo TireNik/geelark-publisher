@@ -203,9 +203,14 @@ class SessionsListAPIView(APIView):
                 'status': session.status,
                 'status_display': session.get_status_display(),
                 'total_tasks': session.total_tasks,
+                'submitted_tasks': session.submitted_tasks,
                 'success_tasks': session.success_tasks,
                 'error_tasks': session.error_tasks,
-                'progress_percent': round((session.success_tasks + session.error_tasks) / session.total_tasks * 100, 1) if session.total_tasks > 0 else 0
+                'progress_percent': round(
+                    (session.submitted_tasks + session.success_tasks + session.error_tasks)
+                    / session.total_tasks * 100,
+                    1
+                ) if session.total_tasks > 0 else 0
             }
             sessions_data.append(data)
 
