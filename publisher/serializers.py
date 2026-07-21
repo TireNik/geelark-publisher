@@ -10,22 +10,31 @@ class DocumentSerializer(serializers.ModelSerializer):
 
 class UploadSessionSerializer(serializers.ModelSerializer):
     document = DocumentSerializer(read_only=True)
+    file_name = serializers.SerializerMethodField()
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     total_tasks = serializers.IntegerField(read_only=True)
     success_tasks = serializers.IntegerField(read_only=True)
+    submitted_tasks = serializers.IntegerField(read_only=True)
+    in_progress_tasks = serializers.IntegerField(read_only=True)
     error_tasks = serializers.IntegerField(read_only=True)
+
+    def get_file_name(self, obj):
+        return obj.document.filename if obj.document_id else ''
 
     class Meta:
         model = UploadSession
         fields = [
             'id',
             'document',
+            'file_name',
             'name',
             'uploaded_at',
             'status',
             'status_display',
             'total_tasks',
             'success_tasks',
+            'submitted_tasks',
+            'in_progress_tasks',
             'error_tasks',
         ]
 
@@ -54,6 +63,9 @@ class PublicationTaskSerializer(serializers.ModelSerializer):
             'status_display',
             'error_message',
             'geelark_task_id',
+            'geelark_status',
+            'geelark_fail_code',
+            'geelark_checked_at',
             'attempt_count',
             'created_at',
             'processed_at'

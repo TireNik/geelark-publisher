@@ -124,7 +124,9 @@ def session_worker(session_id):
             print(f'Ошибка при удалении: {e}')
 
     video_cache.clear()
-    session.status = 'completed'
+    # Отправка в GeeLark завершена, но публикации ещё могут выполняться на телефонах.
+    has_external_tasks = session.tasks.filter(status__in=['submitted', 'processing']).exists()
+    session.status = 'processing' if has_external_tasks else 'completed'
     session.save()
     print(f'Сессия ID:{session.id} завершена')
 
@@ -823,6 +825,45 @@ def send_to_geelark(profile_id: str, video_path: str, title: str, comment: str, 
         'task_id': task_id,
         'resource_url': urls['resourceUrl']
     }
+
+
+def query_geelark_task_statuses(task_ids):
+    """Возвращает актуальные статусы задач GeeLark, сгруппированные по task ID."""
+    unique_ids = list(dict.fromkeys(str(task_id) for task_id in task_ids if task_id))
+    if not unique_ids:
+        return {}
+
+    api_url = "https://openapi.geelark.com/open/v1/task/query"
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {settings.GEELARK_TOKEN}',
+    }
+    tasks_by_id = {}
+
+    # GeeLark принимает не более 100 ID за один запрос.
+    for start in range(0, len(unique_ids), 100):
+        chunk = unique_ids[start:start + 100]
+        request_headers = {**headers, 'traceId': str(uuid.uuid4()).upper()}
+        response = requests.post(
+            api_url,
+            json={'ids': chunk},
+            headers=request_headers,
+            timeout=30,
+        )
+        response.raise_for_status()
+        result = response.json()
+
+        if result.get('code') != 0:
+            raise RuntimeError(
+                f"GeeLark не вернул статусы задач: {result.get('msg') or 'неизвестная ошибка'}"
+            )
+
+        for item in result.get('data', {}).get('items', []):
+            task_id = str(item.get('id') or '')
+            if task_id:
+                tasks_by_id[task_id] = item
+
+    return tasks_by_id
 
 
 def start_cloud_phone(env_id: str) -> bool:

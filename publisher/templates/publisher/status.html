@@ -227,7 +227,7 @@
             color: #c05621;
         }
 
-        .status-downloading, .status-sending, .status-submitted {
+        .status-downloading, .status-sending, .status-submitted, .status-processing {
             background: #bee3f8;
             color: #2c5282;
         }
@@ -282,6 +282,9 @@
             <div class="controls">
                 <button class="btn btn-primary" onclick="location.reload()">
                     🔄 Обновить статус
+                </button>
+                <button class="btn btn-secondary" id="syncGeeLarkButton" onclick="syncGeeLarkStatuses()">
+                    🔎 Проверить результаты GeeLark
                 </button>
                 <button class="btn btn-secondary" onclick="window.location.href='/'">
                     📤 Загрузить новый файл
@@ -357,11 +360,15 @@
             const statsHtml = `
                 <div class="stat success">
                     <div class="stat-number">${data.stats.success}</div>
-                    <div class="stat-label">✅ Успешно</div>
+                    <div class="stat-label">✅ Выполнено в GeeLark</div>
                 </div>
                 <div class="stat total">
                     <div class="stat-number">${data.stats.submitted || 0}</div>
-                    <div class="stat-label">📤 Отправлено в GeeLark</div>
+                    <div class="stat-label">📤 Ожидает запуска</div>
+                </div>
+                <div class="stat total">
+                    <div class="stat-number">${data.stats.in_progress || 0}</div>
+                    <div class="stat-label">⚙️ Выполняется</div>
                 </div>
                 <div class="stat error">
                     <div class="stat-number">${data.stats.error}</div>
@@ -415,6 +422,7 @@
                 'downloading': '📥',
                 'sending': '📤',
                 'submitted': '📤',
+                'processing': '⚙️',
                 'pending': '⏳'
             };
             return icons[status] || '⏳';
@@ -430,6 +438,53 @@
         function showError(message) {
             const tasksBody = document.getElementById('tasksBody');
             tasksBody.innerHTML = `<tr><td colspan="7" class="empty-state">❌ ${message}</td></tr>`;
+        }
+
+        async function syncGeeLarkStatuses() {
+            const button = document.getElementById('syncGeeLarkButton');
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = '⏳ Проверяем GeeLark...';
+
+            try {
+                const response = await fetch(`/api/status/${sessionId}/sync-geelark/`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': getCookie('csrftoken')
+                    }
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Не удалось получить статусы GeeLark');
+                }
+
+                updateUI(data);
+                const sync = data.sync || {};
+                button.textContent = `✅ Проверено: ${sync.checked || 0}`;
+            } catch (error) {
+                button.textContent = '❌ Ошибка проверки';
+                showError(error.message);
+            } finally {
+                setTimeout(() => {
+                    button.disabled = false;
+                    button.textContent = originalText;
+                }, 2000);
+            }
+        }
+
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                for (const cookie of document.cookie.split(';')) {
+                    const trimmed = cookie.trim();
+                    if (trimmed.startsWith(`${name}=`)) {
+                        cookieValue = decodeURIComponent(trimmed.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
         }
 
         // Запускаем загрузку статуса

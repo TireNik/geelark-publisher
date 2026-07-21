@@ -67,6 +67,10 @@ class UploadSession(models.Model):
         return self.tasks.filter(status='submitted').count() if self.tasks else 0
 
     @property
+    def in_progress_tasks(self):
+        return self.tasks.filter(status='processing').count() if self.tasks else 0
+
+    @property
     def the_tasks_process(self):
         """ Выполненный процесс задач на публикацию """
         process_tasks = self.tasks.filter(status__in=['pending', 'processing', 'downloading', 'sending']).count()
@@ -90,13 +94,17 @@ class PublicationTask(models.Model):
             ('downloading', 'Скачивается видео'),
             ('sending', 'Отправляется в Geelark'),
             ('submitted', 'Задача отправлена в GeeLark'),
-            ('success', 'Успешно'),
+            ('processing', 'Выполняется в GeeLark'),
+            ('success', 'Выполнено в GeeLark'),
             ('error', 'Ошибка'),
         ],
         default='pending'
     )
     error_message = models.TextField(blank=True)
     geelark_task_id = models.CharField(max_length=128, blank=True, default='')
+    geelark_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    geelark_fail_code = models.PositiveIntegerField(null=True, blank=True)
+    geelark_checked_at = models.DateTimeField(null=True, blank=True)
     attempt_count = models.PositiveSmallIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     processed_at = models.DateTimeField(null=True, blank=True)

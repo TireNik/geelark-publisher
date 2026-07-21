@@ -11,7 +11,13 @@ from rest_framework.parsers import MultiPartParser
 
 from .models import UploadSession, PublicationTask, Document
 from .forms import ExcelUploadForm
-from .utils import parse_excel_file, session_worker, parse_publish_time, convert_social_networks
+from .utils import (
+    parse_excel_file,
+    session_worker,
+    parse_publish_time,
+    convert_social_networks,
+    query_geelark_task_statuses,
+)
 from .serializers import UploadSessionSerializer, PublicationTaskSerializer
 from datetime import datetime
 
@@ -27,6 +33,7 @@ def upload_page(request):
     return render(request, 'publisher/upload.html')
 
 
+@ensure_csrf_cookie
 def status_page(request, session_id):
     """
     Страница статуса.
@@ -161,29 +168,132 @@ class TaskStatusAPIView(APIView):
 
     def get(self, request, session_id):
         session = get_object_or_404(UploadSession, id=session_id)
-        tasks = session.tasks.all()
+        return Response(build_session_status_payload(session))
 
-        # Считаем прогресс
-        if session.total_tasks > 0:
-            progress = (session.submitted_tasks + session.success_tasks + session.error_tasks) / session.total_tasks * 100
-        else:
-            progress = 0
 
-        # Сериализуем данные
-        session_data = UploadSessionSerializer(session).data
-        tasks_data = PublicationTaskSerializer(tasks, many=True).data
+def build_session_status_payload(session):
+    """Формирует данные статуса с прогрессом финальных результатов GeeLark."""
+    tasks = session.tasks.all()
+    if session.total_tasks > 0:
+        progress = (session.success_tasks + session.error_tasks) / session.total_tasks * 100
+    else:
+        progress = 0
+
+    return {
+        'session': UploadSessionSerializer(session).data,
+        'tasks': PublicationTaskSerializer(tasks, many=True).data,
+        'progress': round(progress, 1),
+        'stats': {
+            'total': session.total_tasks,
+            'success': session.success_tasks,
+            'submitted': session.submitted_tasks,
+            'in_progress': session.in_progress_tasks,
+            'error': session.error_tasks,
+            'pending': session.tasks.filter(
+                status__in=['pending', 'downloading', 'sending']
+            ).count(),
+        },
+    }
+
+
+class GeeLarkTaskStatusSyncAPIView(APIView):
+    """Сверяет сохранённые ID задач с текущим состоянием в GeeLark."""
+
+    def post(self, request, session_id):
+        session = get_object_or_404(UploadSession, id=session_id)
+        tasks = list(
+            session.tasks.exclude(geelark_task_id='').exclude(status__in=['success', 'error'])
+        )
+
+        if not tasks:
+            return Response({
+                'message': 'Нет задач GeeLark, ожидающих проверки.',
+                'sync': {'checked': 0, 'updated': 0, 'not_returned': 0},
+                **build_session_status_payload(session),
+            })
+
+        try:
+            external_tasks = query_geelark_task_statuses(
+                [task.geelark_task_id for task in tasks]
+            )
+        except Exception as exc:
+            return Response(
+                {'error': f'Не удалось получить статусы из GeeLark: {exc}'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        checked_at = timezone.now()
+        updated = 0
+        not_returned = 0
+        status_names = {
+            1: 'ожидает запуска',
+            2: 'выполняется',
+            3: 'завершено',
+            4: 'завершилось с ошибкой',
+            7: 'отменено',
+        }
+
+        for task in tasks:
+            external = external_tasks.get(task.geelark_task_id)
+            if not external:
+                not_returned += 1
+                continue
+
+            try:
+                external_status = int(external.get('status'))
+            except (TypeError, ValueError):
+                continue
+
+            task.geelark_status = external_status
+            task.geelark_checked_at = checked_at
+            update_fields = ['geelark_status', 'geelark_checked_at']
+
+            if external_status == 1:
+                task.status = 'submitted'
+                task.error_message = ''
+                update_fields.extend(['status', 'error_message'])
+            elif external_status == 2:
+                task.status = 'processing'
+                task.error_message = ''
+                update_fields.extend(['status', 'error_message'])
+            elif external_status == 3:
+                task.status = 'success'
+                task.error_message = ''
+                task.geelark_fail_code = None
+                task.processed_at = checked_at
+                update_fields.extend(['status', 'error_message', 'geelark_fail_code', 'processed_at'])
+            elif external_status in (4, 7):
+                task.status = 'error'
+                task.geelark_fail_code = external.get('failCode')
+                reason = external.get('failDesc') or status_names[external_status]
+                task.error_message = (
+                    f"GeeLark: {reason}"
+                    + (f" (код {task.geelark_fail_code})" if task.geelark_fail_code else '')
+                )
+                task.processed_at = checked_at
+                update_fields.extend([
+                    'status', 'geelark_fail_code', 'error_message', 'processed_at'
+                ])
+            else:
+                continue
+
+            task.save(update_fields=update_fields)
+            updated += 1
+
+        has_unfinished_tasks = session.tasks.filter(
+            status__in=['pending', 'downloading', 'sending', 'submitted', 'processing']
+        ).exists()
+        session.status = 'processing' if has_unfinished_tasks else 'completed'
+        session.save(update_fields=['status'])
 
         return Response({
-            'session': session_data,
-            'tasks': tasks_data,
-            'progress': round(progress, 1),
-            'stats': {
-                'total': session.total_tasks,
-                'success': session.success_tasks,
-                'submitted': session.submitted_tasks,
-                'error': session.error_tasks,
-                'pending': session.total_tasks - session.submitted_tasks - session.success_tasks - session.error_tasks
-            }
+            'message': 'Статусы GeeLark обновлены.',
+            'sync': {
+                'checked': len(tasks),
+                'updated': updated,
+                'not_returned': not_returned,
+            },
+            **build_session_status_payload(session),
         })
 
 
@@ -207,7 +317,7 @@ class SessionsListAPIView(APIView):
                 'success_tasks': session.success_tasks,
                 'error_tasks': session.error_tasks,
                 'progress_percent': round(
-                    (session.submitted_tasks + session.success_tasks + session.error_tasks)
+                    (session.success_tasks + session.error_tasks)
                     / session.total_tasks * 100,
                     1
                 ) if session.total_tasks > 0 else 0
