@@ -52,6 +52,7 @@ class PublicationTaskSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'session',
+            'profile_number',
             'profile_id',
             'social_network',
             'video_url',

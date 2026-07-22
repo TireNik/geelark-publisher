@@ -193,9 +193,10 @@ def parse_excel_file(file):
             })
             continue
 
-        # Обработка profile_id: из "1/605043047633256588" достаем "605043047633256588"
+        # Из "30 / 605043047633256588" сохраняем номер телефона 30
+        # отдельно от технического ID GeeLark.
         print(f"row dict profile id -> {row_dict['profile_id']}")
-        profile_id = validate_profile_id(row_dict['profile_id'])
+        profile_number, profile_id = split_profile_reference(row_dict['profile_id'])
         if not profile_id:
             errors.append({
                 'row': row_idx,
@@ -265,6 +266,7 @@ def parse_excel_file(file):
 
         # Всё ок
         rows_data.append({
+            'profile_number': profile_number,
             'profile_id': profile_id,
             'social_network': social_network,
             'video_url': video_url,
@@ -289,20 +291,19 @@ def parse_excel_file(file):
     return rows_data, errors
 
 
+def split_profile_reference(value):
+    """Разделяет запись Excel «номер телефона / ID GeeLark»."""
+    raw_value = str(value).strip()
+    if '/' not in raw_value:
+        return '', raw_value
+
+    profile_number, profile_id = raw_value.split('/', 1)
+    return profile_number.strip(), profile_id.strip()
+
+
 def validate_profile_id(value):
-    """
-    Парсит номер профиля и приводит его к адекватному виду
-    """
-    profile_id = str(value).strip()
-    if '/' in profile_id:
-        print(f' if /')
-        # Берем часть после слеша
-        profile_id = profile_id.split('/')[-1].strip()
-        print(f'взяли часть после слеша -> {profile_id}')
-    else:
-        print(f' не вошли в if / ')
-        profile_id = profile_id
-    return profile_id
+    """Оставлено для совместимости: возвращает технический ID GeeLark."""
+    return split_profile_reference(value)[1]
 
 
 def parse_publish_time(value):

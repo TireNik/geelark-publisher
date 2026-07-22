@@ -246,6 +246,11 @@
             word-break: break-all;
         }
 
+        .profile-number-missing {
+            color: #718096;
+            font-size: 12px;
+        }
+
         .empty-state {
             text-align: center;
             padding: 60px;
@@ -300,7 +305,7 @@
                 <thead>
                     <tr>
                         <th>ID</th>
-                        <th>Профиль</th>
+                        <th>Телефон</th>
                         <th>Соцсеть</th>
                         <th>Название</th>
                         <th>Время публикации</th>
@@ -400,7 +405,12 @@
             tasksBody.innerHTML = data.tasks.map(task => `
                 <tr>
                     <td>${task.id}</td>
-                    <td><code>${escapeHtml(task.profile_id)}</code></td>
+                    <td>
+                        ${task.profile_number
+                            ? `<strong>№ ${escapeHtml(task.profile_number)}</strong>`
+                            : '<span class="profile-number-missing">Номер не указан</span>'}
+                        <div class="task-id">GeeLark ID: ${escapeHtml(task.profile_id)}</div>
+                    </td>
                     <td>${escapeHtml(task.social_network)}</td>
                     <td title="${escapeHtml(task.title || task.comment || '')}">${escapeHtml((task.title || task.comment || '').substring(0, 40))}${(task.title || task.comment || '').length > 40 ? '...' : ''}</td>
                     <td>${task.publish_time_formatted || '-'}</td>

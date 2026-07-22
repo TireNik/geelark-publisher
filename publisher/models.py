@@ -105,6 +105,7 @@ class PublicationTask(models.Model):
     """ Задача на публикацию """
 
     session = models.ForeignKey(UploadSession, on_delete=models.CASCADE, related_name='tasks')
+    profile_number = models.CharField(max_length=32, blank=True, default='', verbose_name='Номер телефона')
     profile_id = models.CharField(max_length=64, verbose_name='Номер профиля')
     social_network = models.CharField(max_length=32, verbose_name='Соцсеть')
     video_url = models.URLField(verbose_name='Ссылка на видео')
