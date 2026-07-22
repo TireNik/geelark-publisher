@@ -29,7 +29,7 @@ class UploadSession(models.Model):
     name = models.CharField(max_length=255)
     uploaded_at = models.DateTimeField(auto_now_add=True)
     status = models.CharField(
-        max_length=20,
+        max_length=24,
         choices=[
             ('pending', 'Ожидает обработки'),
             ('processing', 'Обрабатывается'),
