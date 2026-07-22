@@ -1,4 +1,5 @@
 import threading
+from datetime import datetime, timedelta
 
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -9,7 +10,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser
 
-from .models import UploadSession, PublicationTask, Document
+from .models import UploadSession, PublicationTask, Document, refresh_session_status
 from .forms import ExcelUploadForm
 from .utils import (
     parse_excel_file,
@@ -19,7 +20,6 @@ from .utils import (
     query_geelark_task_statuses,
 )
 from .serializers import UploadSessionSerializer, PublicationTaskSerializer
-from datetime import datetime
 
 
 # HTML СТРАНИЦЫ (только шаблоны)
@@ -168,6 +168,13 @@ class TaskStatusAPIView(APIView):
 
     def get(self, request, session_id):
         session = get_object_or_404(UploadSession, id=session_id)
+        # Обычное обновление страницы также незаметно сверяет незавершённые
+        # задачи с GeeLark. Ошибка внешнего API не должна скрывать уже
+        # сохранённые статусы пользователя.
+        try:
+            sync_geelark_statuses([session])
+        except Exception:
+            pass
         return Response(build_session_status_payload(session))
 
 
@@ -196,42 +203,43 @@ def build_session_status_payload(session):
     }
 
 
-class GeeLarkTaskStatusSyncAPIView(APIView):
-    """Сверяет сохранённые ID задач с текущим состоянием в GeeLark."""
+def sync_geelark_statuses(sessions, force=False):
+    """Синхронизирует незавершённые задачи нескольких сессий с GeeLark.
 
-    def post(self, request, session_id):
-        session = get_object_or_404(UploadSession, id=session_id)
-        tasks = list(
-            session.tasks.exclude(geelark_task_id='').exclude(status__in=['success', 'error'])
+    При обычном просмотре не обращаемся к GeeLark по одной и той же задаче
+    чаще раза в 20 секунд. Ручная кнопка использует force=True.
+    """
+    sessions = list(sessions)
+    if not sessions:
+        return {'checked': 0, 'updated': 0, 'not_returned': 0}
+
+    tasks = list(
+        PublicationTask.objects.filter(session__in=sessions)
+        .exclude(geelark_task_id='')
+        .exclude(status__in=['success', 'error'])
+    )
+    if not force:
+        refresh_after = timezone.now() - timedelta(seconds=20)
+        tasks = [
+            task for task in tasks
+            if task.geelark_checked_at is None or task.geelark_checked_at <= refresh_after
+        ]
+
+    checked_at = timezone.now()
+    updated = 0
+    not_returned = 0
+    status_names = {
+        1: 'ожидает запуска',
+        2: 'выполняется',
+        3: 'завершено',
+        4: 'завершилось с ошибкой',
+        7: 'отменено',
+    }
+
+    if tasks:
+        external_tasks = query_geelark_task_statuses(
+            [task.geelark_task_id for task in tasks]
         )
-
-        if not tasks:
-            return Response({
-                'message': 'Нет задач GeeLark, ожидающих проверки.',
-                'sync': {'checked': 0, 'updated': 0, 'not_returned': 0},
-                **build_session_status_payload(session),
-            })
-
-        try:
-            external_tasks = query_geelark_task_statuses(
-                [task.geelark_task_id for task in tasks]
-            )
-        except Exception as exc:
-            return Response(
-                {'error': f'Не удалось получить статусы из GeeLark: {exc}'},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
-
-        checked_at = timezone.now()
-        updated = 0
-        not_returned = 0
-        status_names = {
-            1: 'ожидает запуска',
-            2: 'выполняется',
-            3: 'завершено',
-            4: 'завершилось с ошибкой',
-            7: 'отменено',
-        }
 
         for task in tasks:
             external = external_tasks.get(task.geelark_task_id)
@@ -280,19 +288,33 @@ class GeeLarkTaskStatusSyncAPIView(APIView):
             task.save(update_fields=update_fields)
             updated += 1
 
-        has_unfinished_tasks = session.tasks.filter(
-            status__in=['pending', 'downloading', 'sending', 'submitted', 'processing']
-        ).exists()
-        session.status = 'processing' if has_unfinished_tasks else 'completed'
-        session.save(update_fields=['status'])
+    for session in sessions:
+        refresh_session_status(session)
+
+    return {
+        'checked': len(tasks),
+        'updated': updated,
+        'not_returned': not_returned,
+    }
+
+
+class GeeLarkTaskStatusSyncAPIView(APIView):
+    """Ручная принудительная сверка сохранённых ID задач с GeeLark."""
+
+    def post(self, request, session_id):
+        session = get_object_or_404(UploadSession, id=session_id)
+
+        try:
+            sync = sync_geelark_statuses([session], force=True)
+        except Exception as exc:
+            return Response(
+                {'error': f'Не удалось получить статусы из GeeLark: {exc}'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
         return Response({
             'message': 'Статусы GeeLark обновлены.',
-            'sync': {
-                'checked': len(tasks),
-                'updated': updated,
-                'not_returned': not_returned,
-            },
+            'sync': sync,
             **build_session_status_payload(session),
         })
 
@@ -301,7 +323,15 @@ class SessionsListAPIView(APIView):
     """API для получения списка всех сессий"""
 
     def get(self, request):
-        sessions = UploadSession.objects.all().order_by('-uploaded_at')[:30]
+        sessions = list(UploadSession.objects.all().order_by('-uploaded_at')[:30])
+
+        # Главная страница сама актуализирует статусы видимых сессий.
+        # Если GeeLark временно недоступен, пользователю всё равно отдаётся
+        # последняя сохранённая информация.
+        try:
+            sync_geelark_statuses(sessions)
+        except Exception:
+            pass
 
         sessions_data = []
         for session in sessions:

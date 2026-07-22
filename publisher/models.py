@@ -34,6 +34,7 @@ class UploadSession(models.Model):
             ('pending', 'Ожидает обработки'),
             ('processing', 'Обрабатывается'),
             ('completed', 'Завершено'),
+            ('completed_with_errors', 'Завершено с ошибками'),
             ('failed', 'Ошибка'),
         ],
         default='pending'
@@ -75,6 +76,29 @@ class UploadSession(models.Model):
         """ Выполненный процесс задач на публикацию """
         process_tasks = self.tasks.filter(status__in=['pending', 'processing', 'downloading', 'sending']).count()
         return f'Прогресс задач на публикацию: {process_tasks}/{self.tasks.all().count()}'
+
+
+def refresh_session_status(session):
+    """Приводит итоговый статус сессии в соответствие со статусами её задач."""
+    has_unfinished_tasks = session.tasks.filter(
+        status__in=['pending', 'downloading', 'sending', 'submitted', 'processing']
+    ).exists()
+
+    if has_unfinished_tasks:
+        new_status = 'processing'
+    elif session.tasks.filter(status='error').exists():
+        new_status = 'completed_with_errors'
+    elif session.status == 'failed':
+        # Ошибка разбора файла остаётся отдельным техническим состоянием.
+        new_status = 'failed'
+    else:
+        new_status = 'completed'
+
+    if session.status != new_status:
+        session.status = new_status
+        session.save(update_fields=['status'])
+
+    return new_status
 
 
 class PublicationTask(models.Model):

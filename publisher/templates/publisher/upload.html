@@ -557,6 +557,11 @@
 
                 if (response.ok && data.success && data.sessions && data.sessions.length > 0) {
                     updateSessionsTable(data.sessions);
+                    if (data.sessions.some(session => (
+                        session.status === 'pending' || session.status === 'processing'
+                    ))) {
+                        setTimeout(loadSessions, 20000);
+                    }
                 } else {
                     sessionsBody.innerHTML = '<tr><td colspan="5" class="empty-history">📭 Нет завершённых сессий</td></tr>';
                 }
@@ -601,6 +606,7 @@
         function getStatusClass(status) {
             const classes = {
                 'completed': 'status-completed',
+                'completed_with_errors': 'status-failed',
                 'processing': 'status-processing',
                 'pending': 'status-pending',
                 'failed': 'status-failed'
@@ -611,6 +617,7 @@
         function getStatusIcon(status) {
             const icons = {
                 'completed': '✅',
+                'completed_with_errors': '⚠️',
                 'processing': '⚙️',
                 'pending': '⏳',
                 'failed': '❌'

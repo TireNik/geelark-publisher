@@ -5,7 +5,7 @@ import time
 import uuid
 import random
 from config import settings
-from .models import UploadSession
+from .models import UploadSession, refresh_session_status
 from datetime import datetime, timedelta
 from django.utils import timezone
 from django.utils.timezone import make_aware
@@ -125,9 +125,7 @@ def session_worker(session_id):
 
     video_cache.clear()
     # Отправка в GeeLark завершена, но публикации ещё могут выполняться на телефонах.
-    has_external_tasks = session.tasks.filter(status__in=['submitted', 'processing']).exists()
-    session.status = 'processing' if has_external_tasks else 'completed'
-    session.save()
+    refresh_session_status(session)
     print(f'Сессия ID:{session.id} завершена')
 
 def parse_excel_file(file):
