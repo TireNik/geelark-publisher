@@ -18,6 +18,7 @@ from .utils import (
     parse_publish_time,
     convert_social_networks,
     query_geelark_task_statuses,
+    rotate_geelark_proxy_port,
     split_profile_reference,
 )
 from .serializers import UploadSessionSerializer, PublicationTaskSerializer
@@ -232,6 +233,7 @@ def sync_geelark_statuses(sessions, force=False):
     checked_at = timezone.now()
     updated = 0
     not_returned = 0
+    proxy_rotation_results = {}
     status_names = {
         1: 'ожидает запуска',
         2: 'выполняется',
@@ -282,6 +284,15 @@ def sync_geelark_statuses(sessions, force=False):
                     f"GeeLark: {reason}"
                     + (f" (код {task.geelark_fail_code})" if task.geelark_fail_code else '')
                 )
+                if str(task.geelark_fail_code) == '29996':
+                    profile_key = str(task.profile_id)
+                    if profile_key not in proxy_rotation_results:
+                        proxy_rotation_results[profile_key] = rotate_geelark_proxy_port(profile_key)
+                    task.error_message = (
+                        f"{task.error_message}. "
+                        f"{proxy_rotation_results[profile_key]['message']}"
+                    )
+
                 task.processed_at = checked_at
                 update_fields.extend([
                     'status', 'geelark_fail_code', 'error_message', 'processed_at'

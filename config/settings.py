@@ -97,3 +97,9 @@ TEMP_VIDEO_DIR = os.path.join(BASE_DIR, 'media', 'temp_videos')
 YANDEX_URL = 'https://cloud-api.yandex.net/v1/disk/public/resources' # API Яндекс Диска для публичных ресурсов
 GEELARK_API_URL = ''
 GEELARK_TOKEN = os.environ.get('GEELARK_TOKEN', '')
+GEELARK_PROXY_AUTO_ROTATE = os.environ.get('GEELARK_PROXY_AUTO_ROTATE', '').lower() in {
+    '1', 'true', 'yes', 'on'
+}
+GEELARK_PROXY_PORT_MIN = int(os.environ.get('GEELARK_PROXY_PORT_MIN', '10000'))
+GEELARK_PROXY_PORT_MAX = int(os.environ.get('GEELARK_PROXY_PORT_MAX', '10999'))
+GEELARK_PROXY_ROTATE_ATTEMPTS = int(os.environ.get('GEELARK_PROXY_ROTATE_ATTEMPTS', '3'))

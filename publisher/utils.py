@@ -865,6 +865,147 @@ def query_geelark_task_statuses(task_ids):
     return tasks_by_id
 
 
+def _geelark_api_post(path, payload):
+    """Send a GeeLark API request without logging credentials or payloads."""
+    token = settings.GEELARK_TOKEN
+    if not token:
+        raise RuntimeError('GeeLark API token is not configured')
+
+    response = requests.post(
+        f'https://openapi.geelark.com/open/v1{path}',
+        json=payload,
+        headers={
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {token}',
+            'traceId': str(uuid.uuid4()).upper(),
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def _safe_geelark_message(payload, default):
+    if not isinstance(payload, dict):
+        return default
+    message = payload.get('msg') or payload.get('message')
+    return str(message) if message else default
+
+
+def rotate_geelark_proxy_port(profile_id):
+    """Move a profile proxy to the next provider port after GeeLark error 29996.
+
+    The failed publication is deliberately not retried: retrying may create a
+    duplicate video.  Passwords are only passed in memory to GeeLark and are
+    never returned, logged, or stored by this application.
+    """
+    if not settings.GEELARK_PROXY_AUTO_ROTATE:
+        return {
+            'changed': False,
+            'message': 'Автосмена порта прокси отключена в настройках сервиса.',
+        }
+
+    port_min = settings.GEELARK_PROXY_PORT_MIN
+    port_max = settings.GEELARK_PROXY_PORT_MAX
+    attempts = settings.GEELARK_PROXY_ROTATE_ATTEMPTS
+    if port_min < 1 or port_max > 65535 or port_min > port_max or attempts < 1:
+        return {
+            'changed': False,
+            'message': 'Автосмена порта прокси не выполнена: неверно задан диапазон портов.',
+        }
+
+    try:
+        phones_payload = _geelark_api_post('/phone/list', {'ids': [str(profile_id)]})
+        if phones_payload.get('code') != 0:
+            return {
+                'changed': False,
+                'message': 'Автосмена порта прокси не выполнена: GeeLark не вернул настройки телефона.',
+            }
+
+        phones = (phones_payload.get('data') or {}).get('items') or []
+        if len(phones) != 1 or not isinstance(phones[0].get('proxy'), dict):
+            return {
+                'changed': False,
+                'message': 'Автосмена порта прокси не выполнена: у телефона не найдено подключённое прокси.',
+            }
+
+        phone_proxy = phones[0]['proxy']
+        scheme = str(phone_proxy.get('type') or '').lower()
+        server = str(phone_proxy.get('server') or '')
+        username = str(phone_proxy.get('username') or '')
+        password = phone_proxy.get('password') or ''
+        current_port = int(phone_proxy.get('port'))
+        if not (scheme and server and username and password):
+            return {
+                'changed': False,
+                'message': 'Автосмена порта прокси не выполнена: данные прокси телефона неполные.',
+            }
+
+        proxies_payload = _geelark_api_post('/proxy/list', {'page': 1, 'pageSize': 100})
+        if proxies_payload.get('code') != 0:
+            return {
+                'changed': False,
+                'message': 'Автосмена порта прокси не выполнена: GeeLark не вернул список прокси.',
+            }
+
+        proxies = (proxies_payload.get('data') or {}).get('list') or []
+        matches = [
+            proxy for proxy in proxies
+            if str(proxy.get('scheme') or '').lower() == scheme
+            and str(proxy.get('server') or '') == server
+            and str(proxy.get('username') or '') == username
+            and int(proxy.get('port') or 0) == current_port
+        ]
+        if len(matches) != 1:
+            return {
+                'changed': False,
+                'message': 'Автосмена порта прокси не выполнена: не удалось однозначно найти это прокси в GeeLark.',
+            }
+
+        saved_proxy = matches[0]
+        span = port_max - port_min + 1
+        max_attempts = min(attempts, span)
+        last_reason = 'GeeLark не подтвердил новый порт'
+        for offset in range(1, max_attempts + 1):
+            next_port = port_min + ((current_port - port_min + offset) % span)
+            update_payload = _geelark_api_post('/proxy/update', {
+                'list': [{
+                    'id': saved_proxy['id'],
+                    'scheme': scheme,
+                    'server': server,
+                    'port': next_port,
+                    'username': username,
+                    'password': saved_proxy.get('password') or password,
+                }],
+            })
+            data = update_payload.get('data') or {}
+            if data.get('successAmount', 0):
+                return {
+                    'changed': True,
+                    'message': (
+                        f'Порт прокси автоматически изменён: {current_port} → {next_port}. '
+                        'Неудачная публикация автоматически не повторялась.'
+                    ),
+                }
+            fail_details = data.get('failDetails') or []
+            last_reason = _safe_geelark_message(
+                fail_details[0] if fail_details else update_payload,
+                last_reason,
+            )
+
+        return {
+            'changed': False,
+            'message': (
+                f'Автосмена порта прокси не выполнена после {max_attempts} попыток: {last_reason}.'
+            ),
+        }
+    except (requests.RequestException, TypeError, ValueError, KeyError) as exc:
+        return {
+            'changed': False,
+            'message': f'Автосмена порта прокси не выполнена: {exc.__class__.__name__}.',
+        }
+
+
 def start_cloud_phone(env_id: str) -> bool:
     """
     Запускает облачный телефон по ID
