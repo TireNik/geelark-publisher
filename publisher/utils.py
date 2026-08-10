@@ -60,13 +60,13 @@ def session_worker(session_id):
             task.status = 'processing'
             task.save()
 
-            # 1. Скачать с Яндекс Диска, с проверкой КЭШа
+            # 1. Скачать видео (Яндекс.Диск или прямая HTTP/HTTPS ссылка), с проверкой КЭШа
             if task.video_url in video_cache:
                 video_path = video_cache[task.video_url]
                 print(f'видео взято из кэша')
             else:
                 print(f'качаем видео')
-                video_path = download_from_yandex(task)
+                video_path = download_video(task)
                 print(f'скачали видео')
                 video_cache[task.video_url] = video_path
                 downloaded_files.append(video_path)
@@ -215,10 +215,12 @@ def parse_excel_file(file):
             continue
 
         video_url = row_dict['video_url']
-        if not validate_yandex_disk_url(video_url):
+        if not validate_video_url(video_url):
             errors.append({
                 'row': row_idx,
-                'errors': [f"Невалидная ссылка Яндекс Диска: {video_url}"],
+                'errors': [
+                    f"Невалидная ссылка на видео (нужен Яндекс.Диск или HTTP/HTTPS URL): {video_url}"
+                ],
                 'data': row_dict
             })
             continue
@@ -376,10 +378,35 @@ def convert_social_networks(network_name):
 
 
 def validate_yandex_disk_url(url):
-    """Проверяет, что ссылка ведет на Яндекс Диск"""
+    """Проверяет, что ссылка ведет на Яндекс Диск."""
+    return is_yandex_disk_url(url)
+
+
+def is_yandex_disk_url(url):
+    """True, если URL — публичная ссылка Яндекс.Диска."""
     if not url:
         return False
-    return 'disk.yandex.ru' in url or 'yadi.sk' in url
+    text = str(url).strip().lower()
+    return 'disk.yandex.ru' in text or 'yadi.sk' in text
+
+
+def is_direct_http_video_url(url):
+    """
+    True для прямой HTTP(S) ссылки на файл (например Video Farm signed URL).
+    Яндекс.Диск сюда не входит — для него отдельный путь через API.
+    """
+    if not url:
+        return False
+    text = str(url).strip()
+    if is_yandex_disk_url(text):
+        return False
+    lower = text.lower()
+    return lower.startswith('https://') or lower.startswith('http://')
+
+
+def validate_video_url(url):
+    """Принимает Яндекс.Диск или прямой HTTP(S) URL."""
+    return is_yandex_disk_url(url) or is_direct_http_video_url(url)
 
 
 def get_yandex_direct_download_url(public_url):
@@ -416,6 +443,26 @@ def get_yandex_direct_download_url(public_url):
             time.sleep(2)
 
 
+def _task_save_path(task) -> str:
+    temp_dir = settings.TEMP_VIDEO_DIR
+    os.makedirs(temp_dir, exist_ok=True)
+    return os.path.join(temp_dir, f'task_{task.id}.mp4')
+
+
+def _stream_download_to_file(url: str, save_path: str, timeout: int = 120) -> str:
+    """Скачивает URL потоком на диск. Возвращает save_path."""
+    response = requests.get(url, stream=True, timeout=timeout, allow_redirects=True)
+    response.raise_for_status()
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    with open(save_path, 'wb') as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                f.write(chunk)
+    if not os.path.isfile(save_path) or os.path.getsize(save_path) == 0:
+        raise Exception(f"Скачанный файл пуст или отсутствует: {save_path}")
+    return save_path
+
+
 def download_from_yandex(task) -> str:
     """
     Функция загрузки видео с Яндекс-диска.
@@ -430,28 +477,44 @@ def download_from_yandex(task) -> str:
     print(f'получаем прямую ссылку. Task ID{task.id}')
     direct_url = get_yandex_direct_download_url(public_url)
     print(f'получили прямую ссылку, начинаем скачивание.')
-    #Создаем папку, если её нет
-    temp_dir = settings.TEMP_VIDEO_DIR
-    os.makedirs(temp_dir, exist_ok=True)
-    save_path = os.path.join(temp_dir, f'task_{task.id}.mp4')
+    save_path = _task_save_path(task)
     # 2. Скачиваем файл
     try:
-        response = requests.get(direct_url, stream=True, timeout=60)
-        response.raise_for_status()
-
-        # Создаем папку, если её нет
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
-        # Скачиваем
-        with open(save_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-        print(f'скачали файл. path - {save_path}')
-        return save_path
-
+        result = _stream_download_to_file(direct_url, save_path, timeout=60)
+        print(f'скачали файл. path - {result}')
+        return result
     except requests.exceptions.RequestException as e:
         raise Exception(f"Ошибка при скачивании видео: {str(e)}")
+
+
+def download_from_http(task) -> str:
+    """
+    Скачивает видео по прямой HTTP(S) ссылке (Video Farm signed URL и т.п.).
+    Возвращает путь к скачанному файлу.
+    """
+    task.status = 'downloading'
+    task.save()
+    url = str(task.video_url).strip()
+    print(f'скачиваем HTTP видео. Task ID={task.id} url={url[:120]}')
+    save_path = _task_save_path(task)
+    try:
+        result = _stream_download_to_file(url, save_path, timeout=180)
+        print(f'скачали HTTP файл. path - {result}')
+        return result
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Ошибка при HTTP-скачивании видео: {str(e)}")
+
+
+def download_video(task) -> str:
+    """Диспетчер: Яндекс.Диск или прямой HTTP(S)."""
+    url = task.video_url
+    if is_yandex_disk_url(url):
+        return download_from_yandex(task)
+    if is_direct_http_video_url(url):
+        return download_from_http(task)
+    raise Exception(
+        f"Неподдерживаемый URL видео (нужен Яндекс.Диск или HTTP/HTTPS): {url}"
+    )
 
 
 def delete_video(file_path: str) -> bool:
