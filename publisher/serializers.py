@@ -67,6 +67,8 @@ class PublicationTaskSerializer(serializers.ModelSerializer):
             'geelark_status',
             'geelark_fail_code',
             'geelark_checked_at',
+            'geelark_cancel_requested_at',
+            'geelark_started_at',
             'attempt_count',
             'created_at',
             'processed_at'

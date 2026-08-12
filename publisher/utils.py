@@ -21,36 +21,6 @@ def session_worker(session_id):
     tasks = session.tasks.filter(status='pending').order_by('id')
     video_cache = {} # КЭШ
     downloaded_files = [] # Для очистки в конце
-    started_phones = []  # Список телефонов, которые мы запустили
-
-    # Получаем уникальные env_id из задач
-    env_ids = set(validate_profile_id(task.profile_id) for task in tasks)
-    # Запускаем каждый уникальный телефон перед началом работы
-    for env_id in env_ids:
-        try:
-            print(f"\n!!!!!!! Проверяем статус телефона {env_id}... !!!!!!!")
-            phone_status = check_phone_status(env_id)
-
-            if phone_status['is_running']:
-                print(f"Телефон {env_id} уже запущен")
-            else:
-                print(f"Телефон {env_id} выключен, запускаем...")
-                start_cloud_phone(env_id)
-                started_phones.append(env_id)
-                # Даем время на запуск
-                time.sleep(8)
-        except Exception as e:
-            print(f"  ❌ Ошибка с телефоном {env_id}: {e}")
-            # Помечаем все задачи этого телефона как ошибки
-            for task in tasks:
-                if task.profile_id == env_id:
-                    task.status = 'error'
-                    task.error_message = f"Не удалось запустить телефон: {e}"
-                    task.processed_at = datetime.now() #timezone.now()
-                    task.save()
-            # Пропускаем обработку задач этого телефона
-            tasks = tasks.exclude(profile_id=env_id)
-
     for task in tasks:
         video = None
 
@@ -106,15 +76,6 @@ def session_worker(session_id):
         time.sleep(1)  # Пауза между задачами
 
     # КОНЕЦ СЕССИИ - выключаем все запущенные телефоны
-    if started_phones:
-        print(f"\n📞 Останавливаем телефоны, запущенные этой сессией...")
-        for env_id in started_phones:
-            try:
-                stop_cloud_phone(env_id)
-            except Exception as e:
-                print(f"  ❌ Ошибка при остановке телефона {env_id}: {e}")
-
-    # КОНЕЦ СЕССИИ - удаляем все скачанные файлы
     for video_path in downloaded_files:
         try:
             if os.path.exists(video_path):
@@ -815,6 +776,39 @@ def add_youtube_task(env_id: str, resource_url: str, schedule_at: int, title: st
 #    return task_ids[0]
 
 
+
+def wait_for_geelark_resource(resource_url: str, timeout_seconds: int = 60) -> None:
+    """дёт, пока загруженное видео станет доступно GeeLark для чтения."""
+    deadline = time.monotonic() + timeout_seconds
+    last_error = ""
+
+    while time.monotonic() < deadline:
+        try:
+            response = requests.get(
+                resource_url,
+                headers={"Range": "bytes=0-0"},
+                stream=True,
+                timeout=15,
+            )
+            status_code = response.status_code
+            response.close()
+
+            if status_code in (200, 206):
+                print("идео подтверждено в хранилище GeeLark.")
+                return
+
+            last_error = f"HTTP {status_code}"
+        except requests.RequestException as exc:
+            last_error = str(exc)
+
+        time.sleep(2)
+
+    raise RuntimeError(
+        "идео не стало доступно в хранилище GeeLark за 60 секунд"
+        + (f": {last_error}" if last_error else "")
+    )
+
+
 def send_to_geelark(profile_id: str, video_path: str, title: str, comment: str, publish_time, social_network: str):
     """
     Полный цикл отправки в Geelark
@@ -832,7 +826,7 @@ def send_to_geelark(profile_id: str, video_path: str, title: str, comment: str, 
 
     # Ждем, пока файл станет доступен
     print(f" >>>> Ожидаем доступности файла...")
-    time.sleep(3)
+    wait_for_geelark_resource(urls['resourceUrl'])
 
     # 3. Создаем задачу на публикацию в зависимости от соцсети
     print(f" >>> Создаем задачу публикации в Geelark для {social_network}...")
@@ -953,6 +947,16 @@ def _safe_geelark_message(payload, default):
         return default
     message = payload.get('msg') or payload.get('message')
     return str(message) if message else default
+
+
+
+def cancel_geelark_task(task_id: str) -> bool:
+    """Requests cancellation of a waiting or running GeeLark automation task."""
+    result = _geelark_api_post('/task/cancel', {'ids': [str(task_id)]})
+    if result.get('code') != 0:
+        return False
+    data = result.get('data') or {}
+    return bool(data.get('successAmount', 0))
 
 
 def rotate_geelark_proxy_port(profile_id):

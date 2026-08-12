@@ -262,6 +262,14 @@ def sync_geelark_statuses(sessions, force=False):
             task.geelark_checked_at = checked_at
             update_fields = ['geelark_status', 'geelark_checked_at']
 
+            if task.status == 'stopping':
+                if external_status in (4, 7):
+                    task.geelark_fail_code = external.get('failCode')
+                    update_fields.append('geelark_fail_code')
+                task.save(update_fields=update_fields)
+                updated += 1
+                continue
+
             if external_status == 1:
                 task.status = 'submitted'
                 task.error_message = ''
@@ -269,6 +277,9 @@ def sync_geelark_statuses(sessions, force=False):
             elif external_status == 2:
                 task.status = 'processing'
                 task.error_message = ''
+                if task.geelark_started_at is None:
+                    task.geelark_started_at = checked_at
+                    update_fields.append('geelark_started_at')
                 update_fields.extend(['status', 'error_message'])
             elif external_status == 3:
                 task.status = 'success'
