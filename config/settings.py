@@ -105,3 +105,10 @@ GEELARK_PROXY_PORT_MAX = int(os.environ.get('GEELARK_PROXY_PORT_MAX', '10999'))
 GEELARK_PROXY_ROTATE_ATTEMPTS = int(os.environ.get('GEELARK_PROXY_ROTATE_ATTEMPTS', '3'))
 
 GEELARK_TASK_TIMEOUT_MINUTES = int(os.environ.get('GEELARK_TASK_TIMEOUT_MINUTES', '15'))
+
+# Параллельный prepare/publish и защита от зависаний (см. docs/upload-cost-optimization.md)
+GEELARK_MAX_PARALLEL = int(os.environ.get('GEELARK_MAX_PARALLEL', '3'))
+GEELARK_UPLOAD_TIMEOUT_SEC = int(os.environ.get('GEELARK_UPLOAD_TIMEOUT_SEC', '180'))
+GEELARK_DOWNLOAD_TIMEOUT_SEC = int(os.environ.get('GEELARK_DOWNLOAD_TIMEOUT_SEC', '180'))
+GEELARK_TASK_SLA_SEC = int(os.environ.get('GEELARK_TASK_SLA_SEC', '900'))
+

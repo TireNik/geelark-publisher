@@ -191,6 +191,15 @@ def build_session_status_payload(session):
     else:
         progress = 0
 
+    totals = [t.t_total_ms for t in tasks if t.t_total_ms is not None]
+    totals_sorted = sorted(totals)
+
+    def percentile(vals, p):
+        if not vals:
+            return None
+        idx = min(len(vals) - 1, max(0, int(round((p / 100) * (len(vals) - 1)))))
+        return vals[idx]
+
     return {
         'session': UploadSessionSerializer(session).data,
         'tasks': PublicationTaskSerializer(tasks, many=True).data,
@@ -204,6 +213,9 @@ def build_session_status_payload(session):
             'pending': session.tasks.filter(
                 status__in=['pending', 'downloading', 'sending']
             ).count(),
+            't_total_ms_p50': percentile(totals_sorted, 50),
+            't_total_ms_p95': percentile(totals_sorted, 95),
+            't_total_ms_max': max(totals_sorted) if totals_sorted else None,
         },
     }
 
