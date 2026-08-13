@@ -65,7 +65,7 @@ class UploadSession(models.Model):
 
     @property
     def submitted_tasks(self):
-        return self.tasks.filter(status='submitted').count() if self.tasks else 0
+        return self.tasks.filter(status__in=['prepared', 'submitted']).count() if self.tasks else 0
 
     @property
     def in_progress_tasks(self):
@@ -74,14 +74,14 @@ class UploadSession(models.Model):
     @property
     def the_tasks_process(self):
         """ Выполненный процесс задач на публикацию """
-        process_tasks = self.tasks.filter(status__in=['pending', 'processing', 'stopping', 'downloading', 'sending']).count()
+        process_tasks = self.tasks.filter(status__in=['pending', 'prepared', 'processing', 'stopping', 'downloading', 'sending']).count()
         return f'Прогресс задач на публикацию: {process_tasks}/{self.tasks.all().count()}'
 
 
 def refresh_session_status(session):
     """Приводит итоговый статус сессии в соответствие со статусами её задач."""
     has_unfinished_tasks = session.tasks.filter(
-        status__in=['pending', 'downloading', 'sending', 'submitted', 'processing', 'stopping']
+        status__in=['pending', 'downloading', 'sending', 'prepared', 'submitted', 'processing', 'stopping']
     ).exists()
 
     if has_unfinished_tasks:
@@ -118,6 +118,7 @@ class PublicationTask(models.Model):
             ('pending', 'Ожидает'),
             ('downloading', 'Скачивается видео'),
             ('sending', 'Отправляется в Geelark'),
+            ('prepared', 'Подготовлено — ждёт времени'),
             ('submitted', 'Задача отправлена в GeeLark'),
             ('processing', 'Выполняется в GeeLark'),
             ('stopping', '\u041e\u0441\u0442\u0430\u043d\u043e\u0432\u043a\u0430 \u0437\u0430\u0434\u0430\u0447\u0438 \u0432 GeeLark'),
