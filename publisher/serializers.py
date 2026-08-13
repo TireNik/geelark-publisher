@@ -71,7 +71,13 @@ class PublicationTaskSerializer(serializers.ModelSerializer):
             'geelark_started_at',
             'attempt_count',
             'created_at',
-            'processed_at'
+            'processed_at',
+            'file_size_bytes',
+            't_download_ms',
+            't_upload_storage_ms',
+            't_phone_start_ms',
+            't_create_task_ms',
+            't_total_ms',
         ]
 
 

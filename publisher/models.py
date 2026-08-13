@@ -137,6 +137,16 @@ class PublicationTask(models.Model):
 
     geelark_started_at = models.DateTimeField(blank=True, null=True)
     geelark_cancel_requested_at = models.DateTimeField(blank=True, null=True)
+
+    # Метрики длительности / размера (prepare→submit; телефон стартует вне воркера)
+    file_size_bytes = models.BigIntegerField(null=True, blank=True)
+    t_download_ms = models.IntegerField(null=True, blank=True)
+    t_upload_storage_ms = models.IntegerField(null=True, blank=True)
+    t_phone_start_ms = models.IntegerField(null=True, blank=True)
+    t_create_task_ms = models.IntegerField(null=True, blank=True)
+    t_total_ms = models.IntegerField(null=True, blank=True)
+    resource_url = models.TextField(blank=True, default='')
+
     class Meta:
         verbose_name = 'Задача на публикацию'
         verbose_name_plural = 'Задачи на публикацию'

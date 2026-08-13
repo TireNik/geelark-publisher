@@ -13,81 +13,10 @@ from django.core.exceptions import ValidationError
 
 
 def session_worker(session_id):
-    """
-    Один воркер на сессию.
-    Обрабатывает задачи синхронно, по одной.
-    """
-    session = UploadSession.objects.get(id=session_id)
-    tasks = session.tasks.filter(status='pending').order_by('id')
-    video_cache = {} # КЭШ
-    downloaded_files = [] # Для очистки в конце
-    for task in tasks:
-        video = None
+    """Совместимость: делегирует в session_runner (prepare → publish API, без старта телефонов)."""
+    from .session_runner import session_worker as _run
 
-        try:
-            print(f'начало task')
-            # Обрабатываем одну задачу
-            task.status = 'processing'
-            task.save()
-
-            # 1. Скачать видео (Яндекс.Диск или прямая HTTP/HTTPS ссылка), с проверкой КЭШа
-            if task.video_url in video_cache:
-                video_path = video_cache[task.video_url]
-                print(f'видео взято из кэша')
-            else:
-                print(f'качаем видео')
-                video_path = download_video(task)
-                print(f'скачали видео')
-                video_cache[task.video_url] = video_path
-                downloaded_files.append(video_path)
-                print(f'записали в кэш')
-
-            task.status = 'sending'
-            task.save()
-            # 2. Отправить в Geelark
-            result = send_to_geelark(
-                profile_id=task.profile_id,
-                video_path=video_path,
-                title=task.title,
-                comment=task.comment,
-                publish_time=task.publish_time,
-                social_network=task.social_network
-            )
-            print(f'отправили geelark')
-
-            # GeeLark принял задачу, но публикация в социальной сети ещё не подтверждена.
-            task.status = 'submitted'
-            task.geelark_task_id = result['task_id']
-            task.attempt_count += 1
-            task.processed_at = timezone.now()
-            print(f'установили статус, сохранили')
-            task.save()
-            session.save()
-
-        except Exception as e:
-            # Ошибка
-            task.status = 'error'
-            task.error_message = str(e)
-            task.attempt_count += 1
-            task.processed_at = timezone.now()
-            task.save()
-            session.save()
-
-        time.sleep(1)  # Пауза между задачами
-
-    # КОНЕЦ СЕССИИ - выключаем все запущенные телефоны
-    for video_path in downloaded_files:
-        try:
-            if os.path.exists(video_path):
-                os.remove(video_path)
-                print(f'Удален файл: {video_path}')
-        except Exception as e:
-            print(f'Ошибка при удалении: {e}')
-
-    video_cache.clear()
-    # Отправка в GeeLark завершена, но публикации ещё могут выполняться на телефонах.
-    refresh_session_status(session)
-    print(f'Сессия ID:{session.id} завершена')
+    _run(session_id)
 
 def parse_excel_file(file):
     """
@@ -520,16 +449,66 @@ def get_upload_url(file_type: str = "mp4") -> dict:
 
 
 def upload_video_to_storage(video_path: str, upload_url: str) -> None:
-    """Шаг 2: Загружаем видео в хранилище Geelark (PUT запрос)"""
+    """Шаг 2: Загружаем видео в хранилище Geelark (PUT запрос). С timeout против зависаний."""
+    timeout = int(getattr(settings, 'GEELARK_UPLOAD_TIMEOUT_SEC', 180))
     with open(video_path, 'rb') as f:
         # ВАЖНО: НИКАКИХ ДОПОЛНИТЕЛЬНЫХ ЗАГОЛОВКОВ!
-        response = requests.put(upload_url, data=f)
+        response = requests.put(upload_url, data=f, timeout=timeout)
 
     if response.status_code != 200:
         print(f"  ❌ Ошибка загрузки!")
         print(f"  Status code: {response.status_code}")
         print(f"  Response: {response.text[:500]}")
         raise Exception(f"Ошибка загрузки видео в хранилище: {response.status_code} - {response.text}")
+
+
+def upload_local_file_to_geelark_storage(video_path: str) -> str:
+    """getUrl + PUT + wait_for_geelark_resource → resourceUrl. Телефон не нужен."""
+    urls = get_upload_url('mp4')
+    upload_video_to_storage(video_path, urls['uploadUrl'])
+    wait_for_geelark_resource(urls['resourceUrl'])
+    return urls['resourceUrl']
+
+
+def create_geelark_publish_task(
+    env_id: str,
+    resource_url: str,
+    title: str,
+    comment: str,
+    publish_time,
+    social_network: str,
+) -> str:
+    """Создаёт RPA-задачу публикации. Возвращает geelark task id."""
+    schedule_timestamp = int(publish_time.timestamp()) if publish_time else int(time.time())
+    network = (social_network or '').lower()
+
+    if network == 'instagram':
+        return add_instagram_task(
+            env_id=env_id,
+            resource_url=resource_url,
+            schedule_at=schedule_timestamp,
+            description=comment,
+        )
+    if network == 'youtube':
+        youtube_title = str(title or '').strip()
+        if not youtube_title:
+            raise ValueError('Для YouTube нужен непустой заголовок.')
+        if len(youtube_title) > 100:
+            raise ValueError(
+                f'Заголовок YouTube слишком длинный: {len(youtube_title)} из 100 символов.'
+            )
+        return add_youtube_task(
+            env_id=env_id,
+            resource_url=resource_url,
+            schedule_at=schedule_timestamp,
+            title=youtube_title,
+        )
+    return add_tiktok_task(
+        env_id=env_id,
+        resource_url=resource_url,
+        schedule_at=schedule_timestamp,
+        description=comment,
+    )
 
 
 def add_publish_task(env_id: str, resource_url: str, schedule_at: int, comment: str = None, description: str = None,
@@ -811,75 +790,25 @@ def wait_for_geelark_resource(resource_url: str, timeout_seconds: int = 60) -> N
 
 def send_to_geelark(profile_id: str, video_path: str, title: str, comment: str, publish_time, social_network: str):
     """
-    Полный цикл отправки в Geelark
-    profile_id - это envId (ID облачного телефона)
-    social_network - Instagram, YouTube, TikTok
+    Полный цикл: storage upload + create task.
+    Телефон не стартуем здесь (см. scheduled-phone-timeout / watchdog).
     """
-    # 1. Получаем uploadUrl
-    print(f"Получаем uploadUrl от Geelark...")
-    urls = get_upload_url('mp4')
-
-    # 2. Загружаем видео в хранилище
-    print(f"Загружаем видео в хранилище Geelark...")
-    upload_video_to_storage(video_path, urls['uploadUrl'])
-    print(f" >>>> Видео загружено в хранилище")
-
-    # Ждем, пока файл станет доступен
-    print(f" >>>> Ожидаем доступности файла...")
-    wait_for_geelark_resource(urls['resourceUrl'])
-
-    # 3. Создаем задачу на публикацию в зависимости от соцсети
+    print("Загружаем видео в хранилище Geelark...")
+    resource_url = upload_local_file_to_geelark_storage(video_path)
     print(f" >>> Создаем задачу публикации в Geelark для {social_network}...")
-    schedule_timestamp = int(publish_time.timestamp()) if publish_time else int(time.time())
-    print(f' >>> получили таймстамп - {schedule_timestamp}')
-
-
-    # Маршрутизация по соцсетям
-    if social_network.lower() == 'instagram':
-        print(f'Instagramm task, lets Go')
-        task_id = add_instagram_task(
-            env_id=profile_id,
-            resource_url=urls['resourceUrl'],
-            schedule_at=schedule_timestamp,
-            description=comment
-        )
-    elif social_network.lower() == 'youtube':
-        youtube_title = str(title or '').strip()
-        if not youtube_title:
-            raise ValueError('Для YouTube нужен непустой заголовок.')
-        if len(youtube_title) > 100:
-            raise ValueError(f'Заголовок YouTube слишком длинный: {len(youtube_title)} из 100 символов.')
-        task_id = add_youtube_task(
-            env_id=profile_id,
-            resource_url=urls['resourceUrl'],
-            schedule_at=schedule_timestamp,
-            title=youtube_title,
-            #description=title
-            #description=comment
-        )
-    else:  # TikTok (по умолчанию)
-        print(f'TikTok task lets GO')
-        task_id = add_tiktok_task(
-            env_id=profile_id,
-            resource_url=urls['resourceUrl'],
-            schedule_at=schedule_timestamp,
-            description=comment
-        )
-
-    #task_id = add_publish_task(
-    #    env_id=profile_id,
-    #    resource_url=urls['resourceUrl'],
-    #    schedule_at=schedule_timestamp,
-    #    title=title,
-    #    description=comment,
-    #    social_network=social_network
-    #)
+    task_id = create_geelark_publish_task(
+        env_id=profile_id,
+        resource_url=resource_url,
+        title=title,
+        comment=comment,
+        publish_time=publish_time,
+        social_network=social_network,
+    )
     print(f"✅ Задача создана, taskId: {task_id}")
-
     return {
         'success': True,
         'task_id': task_id,
-        'resource_url': urls['resourceUrl']
+        'resource_url': resource_url,
     }
 
 
@@ -1122,7 +1051,7 @@ def check_phone_status(env_id: str) -> dict:
     token = settings.GEELARK_TOKEN
 
     headers = {
-        'Content-Type': 'application / json',
+        'Content-Type': 'application/json',
         'traceId': trace_id,
         'Authorization': f'Bearer {token}'
     }
