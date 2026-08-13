@@ -109,19 +109,22 @@ def _publish_task(
     publish_semaphore: threading.Semaphore,
     sla_deadline: float,
 ) -> None:
+    """Сохраняет подготовленное видео без запуска телефона GeeLark."""
     close_old_connections()
     t0 = time.monotonic()
-    env_id = u.validate_profile_id(task.profile_id)
 
     try:
-        if time.monotonic() > sla_deadline:
-            raise TimeoutError(f"SLA задачи ({_cfg_int('GEELARK_TASK_SLA_SEC', 900)}s)")
+        # Сразу выявляем неверный ID профиля, но GeeLark-задачу пока не создаём.
+        u.validate_profile_id(task.profile_id)
 
-        task.status = "sending"
+        task.status = "prepared"
         task.file_size_bytes = prepared.get("file_size_bytes")
         task.t_download_ms = prepared.get("t_download_ms")
         task.t_upload_storage_ms = prepared.get("t_upload_storage_ms")
         task.resource_url = prepared.get("resource_url") or ""
+        task.t_total_ms = int((time.monotonic() - t0) * 1000)
+        task.error_message = ""
+
         task.save(
             update_fields=[
                 "status",
@@ -129,47 +132,14 @@ def _publish_task(
                 "t_download_ms",
                 "t_upload_storage_ms",
                 "resource_url",
-            ]
-        )
-
-        with publish_semaphore:
-            if time.monotonic() > sla_deadline:
-                raise TimeoutError("SLA перед publish")
-
-            t_api0 = time.monotonic()
-            geelark_task_id = u.create_geelark_publish_task(
-                env_id=env_id,
-                resource_url=prepared["resource_url"],
-                title=task.title,
-                comment=task.comment,
-                publish_time=task.publish_time,
-                social_network=task.social_network,
-            )
-            t_create_ms = int((time.monotonic() - t_api0) * 1000)
-
-        # Как в upstream: приняли задачу, RPA ещё не подтверждён.
-        task.status = "submitted"
-        task.geelark_task_id = str(geelark_task_id)
-        task.t_create_task_ms = t_create_ms
-        task.t_total_ms = int((time.monotonic() - t0) * 1000)
-        task.attempt_count = (task.attempt_count or 0) + 1
-        task.processed_at = timezone.now()
-        task.error_message = ""
-        task.save(
-            update_fields=[
-                "status",
-                "geelark_task_id",
-                "t_create_task_ms",
                 "t_total_ms",
-                "attempt_count",
-                "processed_at",
                 "error_message",
             ]
         )
-        print(f"✅ task {task.id} submitted geelark_task_id={geelark_task_id} total_ms={task.t_total_ms}")
+        print(f"✓ task {task.id} prepared; GeeLark will start near publish time")
     except Exception as exc:
         _mark_error(task, str(exc), t0)
-        print(f"❌ task {task.id}: {exc}")
+        print(f"✗ task {task.id}: {exc}")
     finally:
         close_old_connections()
 

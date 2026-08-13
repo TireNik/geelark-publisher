@@ -38,7 +38,7 @@ services:
       - .env
     environment:
       - PYTHONPATH=/app
-    command: sh -c "while true; do python manage.py geelark_watchdog; sleep 60; done"
+    command: sh -c "while true; do python manage.py geelark_dispatch; python manage.py geelark_watchdog; sleep 60; done"
     depends_on:
       - app
 
