@@ -502,6 +502,7 @@ def create_geelark_publish_task(
             resource_url=resource_url,
             schedule_at=schedule_timestamp,
             title=youtube_title,
+            description=comment,
         )
     return add_tiktok_task(
         env_id=env_id,
@@ -663,7 +664,13 @@ def add_instagram_task(env_id: str, resource_url: str, schedule_at: int, descrip
     return task_id
 
 
-def add_youtube_task(env_id: str, resource_url: str, schedule_at: int, title: str) -> str:
+def add_youtube_task(
+    env_id: str,
+    resource_url: str,
+    schedule_at: int,
+    title: str,
+    description: str = None,
+) -> str:
     """Создание задачи для YouTube Video"""
     api_url = "https://openapi.geelark.com/open/v1/rpa/task/youtubePubShort"
     trace_id = str(uuid.uuid4()).upper()
@@ -679,12 +686,13 @@ def add_youtube_task(env_id: str, resource_url: str, schedule_at: int, title: st
     payload = {
         "scheduleAt": schedule_at,
         "id": str(env_id),
-        "title": safe_title,  # Лимит 100 символов
-        #"description": description[:5000] if description else "",  # Лимит 5000 символов
+        "title": safe_title[:100],
         "video": resource_url,
         "sameStyleVoice": 0,
         "originalVoice": 0
     }
+    if description and str(description).strip():
+        payload["description"] = str(description).strip()[:5000]
 
     # Добавляем опциональные поля
     #payload["name"] = f"Auto publish YouTube {int(time.time())}"

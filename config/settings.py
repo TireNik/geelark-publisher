@@ -109,6 +109,8 @@ GEELARK_TASK_TIMEOUT_MINUTES = int(os.environ.get('GEELARK_TASK_TIMEOUT_MINUTES'
 # Video Farm: POST shareLink for /publish/stats (Excel col C = signed final URL)
 VF_SHARELINK_URL = os.environ.get('VF_SHARELINK_URL', '').strip()
 VF_SHARELINK_TOKEN = os.environ.get('VF_SHARELINK_TOKEN', '').strip()
+# Incoming JSON from Video Farm POST /api/ingest/; empty → reuse VF_SHARELINK_TOKEN
+VF_INGEST_TOKEN = os.environ.get('VF_INGEST_TOKEN', '').strip()
 
 # Параллельный prepare/publish и защита от зависаний (см. docs/upload-cost-optimization.md)
 GEELARK_MAX_PARALLEL = int(os.environ.get('GEELARK_MAX_PARALLEL', '3'))

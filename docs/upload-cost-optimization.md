@@ -38,6 +38,8 @@ shareLink: task/query → POST Video Farm /api/public/publish/share-link
 
 HTTP URL из Video Farm (колонка C) принимается; `video_url` max_length=2048.
 
+Прямая отправка без Excel: `POST /api/ingest/` (`docs/json-ingest.md`). `dryRun` делает HEAD URL и не стартует телефоны.
+
 ## Конфиг
 
 См. `.env.example`: `GEELARK_MAX_PARALLEL`, `GEELARK_UPLOAD_TIMEOUT_SEC`,
