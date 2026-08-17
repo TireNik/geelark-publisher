@@ -3,7 +3,7 @@ from unittest.mock import patch
 from django.test import SimpleTestCase, override_settings
 from rest_framework.test import APIRequestFactory
 
-from publisher.json_ingest import JsonIngestView, parse_ingest_item
+from publisher.json_ingest import JsonIngestTestView, JsonIngestView, parse_ingest_item
 from publisher.utils import add_youtube_task
 
 
@@ -91,6 +91,33 @@ class JsonIngestViewTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data['dryRun'])
         self.assertEqual(response.data['totalTasks'], 1)
+        head.assert_called_once()
+
+
+    @patch('publisher.json_ingest.UploadSession.objects.create')
+    @patch('publisher.json_ingest.head_video_url')
+    def test_test_view_forces_dry_run_without_session(self, head, create_session):
+        head.return_value = {
+            'videoUrl': 'https://ozon-panel.ru/video-farm/p/abcdefgh',
+            'ok': True,
+            'status': 200,
+            'contentType': 'video/mp4',
+            'contentLength': '12',
+        }
+        live_payload = dict(self.payload)
+        live_payload['dryRun'] = False
+        view = JsonIngestTestView.as_view()
+        with override_settings(VF_INGEST_TOKEN='secret', VF_SHARELINK_TOKEN=''):
+            request = self.factory.post(
+                '/api/ingest/test/',
+                live_payload,
+                format='json',
+                HTTP_X_GEELARK_INGEST_TOKEN='secret',
+            )
+            response = view(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['dryRun'])
+        create_session.assert_not_called()
         head.assert_called_once()
 
 

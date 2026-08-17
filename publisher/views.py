@@ -24,7 +24,7 @@ from .utils import (
 from .phone_guard import mark_phone_stopped, stop_phone_if_idle
 from .videofarm_callback import extract_share_link, notify_videofarm_share_link
 from .serializers import UploadSessionSerializer, PublicationTaskSerializer
-from .json_ingest import JsonIngestView  # noqa: F401  — urls.py
+from .json_ingest import JsonIngestView, JsonIngestTestView  # noqa: F401  — urls.py
 
 
 # HTML СТРАНИЦЫ (только шаблоны)

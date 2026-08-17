@@ -97,6 +97,8 @@ class JsonIngestView(APIView):
     parser_classes = (JSONParser,)
     authentication_classes = ()
     permission_classes = ()
+    # True on /api/ingest/test/ — never creates a session, even if body says dryRun=false.
+    force_dry_run = False
 
     def post(self, request):
         expected = ingest_token()
@@ -119,7 +121,7 @@ class JsonIngestView(APIView):
 
         body = request.data if isinstance(request.data, dict) else {}
         items = body.get('items') or []
-        dry_run = bool(body.get('dryRun') or body.get('dry_run'))
+        dry_run = self.force_dry_run or bool(body.get('dryRun') or body.get('dry_run'))
         if not isinstance(items, list) or not items:
             return Response(
                 {'success': False, 'error': 'items must be a non-empty list'},
@@ -185,3 +187,9 @@ class JsonIngestView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+class JsonIngestTestView(JsonIngestView):
+    """Token-only dry-run. Not linked from the Excel UI. Never starts phones."""
+
+    force_dry_run = True

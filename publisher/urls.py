@@ -6,6 +6,7 @@ app_name = 'publisher'
 urlpatterns = [
     # API endpoints (для данных)
     path('api/upload/', views.ExcelUploadView.as_view(), name='api_upload'),
+    path('api/ingest/test/', views.JsonIngestTestView.as_view(), name='api_ingest_test'),
     path('api/ingest/', views.JsonIngestView.as_view(), name='api_ingest'),
     path('api/status/<int:session_id>/', views.TaskStatusAPIView.as_view(), name='api_status'),
     path('api/status/<int:session_id>/sync-geelark/', views.GeeLarkTaskStatusSyncAPIView.as_view(), name='api_sync_geelark'),

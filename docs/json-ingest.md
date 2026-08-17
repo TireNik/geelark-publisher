@@ -5,21 +5,24 @@
 
 ## Зачем
 
-Конвейер больше не генерирует Excel как основной путь. Video Farm шлёт JSON задач; publisher скачивает `final.mp4` по HTTP (как уже умеет `download_from_http`) и дальше идёт существующий `session_worker`.
+Конвейер Video Farm шлёт JSON задач; publisher скачивает `final.mp4` по HTTP и дальше идёт существующий `session_worker`.
 
-Excel `POST /api/upload/` не удаляем.
+Страница загрузки Excel **не меняется**: операторы по-прежнему грузят таблицу через `POST /api/upload/`. JSON — отдельный вход только для Video Farm.
 
-## Эндпоинт
+## Эндпоинты
 
-`POST /api/ingest/`
+`POST /api/ingest/` — live (создаёт сессию).  
+`POST /api/ingest/test/` — только проверка URL, **всегда** dry-run, сессию не создаёт. Не показан в HTML. Без заголовка токена — 401.
 
 Заголовок: `X-Geelark-Ingest-Token` или `X-VideoFarm-Token`.  
-Секрет: `VF_INGEST_TOKEN` или, если пусто, `VF_SHARELINK_TOKEN`.
+Секрет: `VF_INGEST_TOKEN` или, если пусто, `VF_SHARELINK_TOKEN`. Пусто оба → 503.
 
-### dryRun
+### test / dryRun
 
-`{"dryRun": true, "items":[...]}` — HEAD каждого `videoUrl`, без сессии и без телефонов.  
-Нужен, чтобы проверить, что GeeLark-сервер видит Video Farm, не тратя минуты прокси.
+HEAD каждого `videoUrl`, без сессии и без телефонов.  
+Нужен, чтобы проверить, что GeeLark-сервер видит Video Farm, не тратя минуты прокси. На публичной странице загрузки кнопки нет.
+
+После публикации `session_worker` / sync статусов по-прежнему шлёт `shareLink` в VF `POST /api/public/publish/share-link` (тот же токен).
 
 ### live
 
