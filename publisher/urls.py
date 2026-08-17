@@ -7,6 +7,7 @@ urlpatterns = [
     # API endpoints (для данных)
     path('api/upload/', views.ExcelUploadView.as_view(), name='api_upload'),
     path('api/status/<int:session_id>/', views.TaskStatusAPIView.as_view(), name='api_status'),
+    path('api/status/<int:session_id>/sync-geelark/', views.GeeLarkTaskStatusSyncAPIView.as_view(), name='api_sync_geelark'),
     path('api/sessions/', views.SessionsListAPIView.as_view(), name='api_sessions'),
     #path('api/process/<int:session_id>/', views.ProcessTaskAPIView.as_view(), name='api_process'),
 

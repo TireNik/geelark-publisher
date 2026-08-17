@@ -5,7 +5,7 @@ import time
 import uuid
 import random
 from config import settings
-from .models import UploadSession
+from .models import UploadSession, refresh_session_status
 from datetime import datetime, timedelta
 from django.utils import timezone
 from django.utils.timezone import make_aware
@@ -13,117 +13,10 @@ from django.core.exceptions import ValidationError
 
 
 def session_worker(session_id):
-    """
-    Один воркер на сессию.
-    Обрабатывает задачи синхронно, по одной.
-    """
-    session = UploadSession.objects.get(id=session_id)
-    tasks = session.tasks.filter(status='pending').order_by('id')
-    video_cache = {} # КЭШ
-    downloaded_files = [] # Для очистки в конце
-    started_phones = []  # Список телефонов, которые мы запустили
+    """Совместимость: делегирует в session_runner (prepare → publish API, без старта телефонов)."""
+    from .session_runner import session_worker as _run
 
-    # Получаем уникальные env_id из задач
-    env_ids = set(validate_profile_id(task.profile_id) for task in tasks)
-    # Запускаем каждый уникальный телефон перед началом работы
-    for env_id in env_ids:
-        try:
-            print(f"\n!!!!!!! Проверяем статус телефона {env_id}... !!!!!!!")
-            phone_status = check_phone_status(env_id)
-
-            if phone_status['is_running']:
-                print(f"Телефон {env_id} уже запущен")
-            else:
-                print(f"Телефон {env_id} выключен, запускаем...")
-                start_cloud_phone(env_id)
-                started_phones.append(env_id)
-                # Даем время на запуск
-                time.sleep(8)
-        except Exception as e:
-            print(f"  ❌ Ошибка с телефоном {env_id}: {e}")
-            # Помечаем все задачи этого телефона как ошибки
-            for task in tasks:
-                if task.profile_id == env_id:
-                    task.status = 'error'
-                    task.error_message = f"Не удалось запустить телефон: {e}"
-                    task.processed_at = datetime.now() #timezone.now()
-                    task.save()
-            # Пропускаем обработку задач этого телефона
-            tasks = tasks.exclude(profile_id=env_id)
-
-    for task in tasks:
-        video = None
-
-        try:
-            print(f'начало task')
-            # Обрабатываем одну задачу
-            task.status = 'processing'
-            task.save()
-
-            # 1. Скачать с Яндекс Диска, с проверкой КЭШа
-            if task.video_url in video_cache:
-                video_path = video_cache[task.video_url]
-                print(f'видео взято из кэша')
-            else:
-                print(f'качаем видео')
-                video_path = download_from_yandex(task)
-                print(f'скачали видео')
-                video_cache[task.video_url] = video_path
-                downloaded_files.append(video_path)
-                print(f'записали в кэш')
-
-            task.status = 'sending'
-            task.save()
-            # 2. Отправить в Geelark
-            result = send_to_geelark(
-                profile_id=task.profile_id,
-                video_path=video_path,
-                #title=task.title, Больше без названия
-                comment=task.comment,
-                publish_time=task.publish_time,
-                social_network=task.social_network
-            )
-            print(f'отправили geelark')
-
-            # 3. Успех
-            task.status = 'success'
-            task.processed_at = datetime.now() #timezone.now()
-            print(f'установили статус, сохранили')
-            task.save()
-            session.save()
-
-        except Exception as e:
-            # Ошибка
-            task.status = 'error'
-            task.error_message = str(e)
-            task.processed_at = datetime.now()
-            task.save()
-            session.save()
-
-        time.sleep(1)  # Пауза между задачами
-
-    # КОНЕЦ СЕССИИ - выключаем все запущенные телефоны
-    if started_phones:
-        print(f"\n📞 Останавливаем телефоны, запущенные этой сессией...")
-        for env_id in started_phones:
-            try:
-                stop_cloud_phone(env_id)
-            except Exception as e:
-                print(f"  ❌ Ошибка при остановке телефона {env_id}: {e}")
-
-    # КОНЕЦ СЕССИИ - удаляем все скачанные файлы
-    for video_path in downloaded_files:
-        try:
-            if os.path.exists(video_path):
-                os.remove(video_path)
-                print(f'Удален файл: {video_path}')
-        except Exception as e:
-            print(f'Ошибка при удалении: {e}')
-
-    video_cache.clear()
-    session.status = 'completed'
-    session.save()
-    print(f'Сессия ID:{session.id} завершена')
+    _run(session_id)
 
 def parse_excel_file(file):
     """
@@ -153,6 +46,7 @@ def parse_excel_file(file):
         #4: 'title', Больше неактивно
         4: 'comment',
         5: 'publish_time',
+        6: 'youtube_title',
     }
 
     # Проходим по строкам (начинаем с 2, т.к. 1-я строка - заголовки)
@@ -165,10 +59,11 @@ def parse_excel_file(file):
 
         # Парсим все поля
         for col_idx, field_name in column_map.items():
-            value = row[col_idx - 1]
+            # Старые таблицы могут содержать только первые пять колонок.
+            value = row[col_idx - 1] if len(row) >= col_idx else None
 
             # Пропускаем проверку на пустоту для publish_time (обработаем позже рандомом)
-            if field_name == 'publish_time':
+            if field_name in ('publish_time', 'youtube_title'):
                 row_dict[field_name] = value if value is not None else None
                 continue
 
@@ -188,9 +83,10 @@ def parse_excel_file(file):
             })
             continue
 
-        # Обработка profile_id: из "1/605043047633256588" достаем "605043047633256588"
+        # Из "30 / 605043047633256588" сохраняем номер телефона 30
+        # отдельно от технического ID GeeLark.
         print(f"row dict profile id -> {row_dict['profile_id']}")
-        profile_id = validate_profile_id(row_dict['profile_id'])
+        profile_number, profile_id = split_profile_reference(row_dict['profile_id'])
         if not profile_id:
             errors.append({
                 'row': row_idx,
@@ -209,10 +105,12 @@ def parse_excel_file(file):
             continue
 
         video_url = row_dict['video_url']
-        if not validate_yandex_disk_url(video_url):
+        if not validate_video_url(video_url):
             errors.append({
                 'row': row_idx,
-                'errors': [f"Невалидная ссылка Яндекс Диска: {video_url}"],
+                'errors': [
+                    f"Невалидная ссылка на видео (нужен Яндекс.Диск или HTTP/HTTPS URL): {video_url}"
+                ],
                 'data': row_dict
             })
             continue
@@ -245,12 +143,26 @@ def parse_excel_file(file):
             })
             continue
 
+        youtube_title = row_dict.get('youtube_title') or comment
+        youtube_title = str(youtube_title).strip()
+        if social_network == 'YouTube' and len(youtube_title) > 100:
+            errors.append({
+                'row': row_idx,
+                'errors': [
+                    f"Заголовок YouTube должен быть не длиннее 100 символов. Получено: {len(youtube_title)}. "
+                    "Укажите короткий заголовок в колонке F."
+                ],
+                'data': row_dict
+            })
+            continue
+
         # Всё ок
         rows_data.append({
+            'profile_number': profile_number,
             'profile_id': profile_id,
             'social_network': social_network,
             'video_url': video_url,
-            #'title': row_dict['title'], Больше нет названия
+            'title': youtube_title if social_network == 'YouTube' else str(comment).strip()[:255],
             'comment': str(comment).strip(),
             'publish_time': publish_time,
             'raw_row': row_idx,
@@ -271,20 +183,19 @@ def parse_excel_file(file):
     return rows_data, errors
 
 
+def split_profile_reference(value):
+    """Разделяет запись Excel «номер телефона / ID GeeLark»."""
+    raw_value = str(value).strip()
+    if '/' not in raw_value:
+        return '', raw_value
+
+    profile_number, profile_id = raw_value.split('/', 1)
+    return profile_number.strip(), profile_id.strip()
+
+
 def validate_profile_id(value):
-    """
-    Парсит номер профиля и приводит его к адекватному виду
-    """
-    profile_id = str(value).strip()
-    if '/' in profile_id:
-        print(f' if /')
-        # Берем часть после слеша
-        profile_id = profile_id.split('/')[-1].strip()
-        print(f'взяли часть после слеша -> {profile_id}')
-    else:
-        print(f' не вошли в if / ')
-        profile_id = profile_id
-    return profile_id
+    """Оставлено для совместимости: возвращает технический ID GeeLark."""
+    return split_profile_reference(value)[1]
 
 
 def parse_publish_time(value):
@@ -357,10 +268,35 @@ def convert_social_networks(network_name):
 
 
 def validate_yandex_disk_url(url):
-    """Проверяет, что ссылка ведет на Яндекс Диск"""
+    """Проверяет, что ссылка ведет на Яндекс Диск."""
+    return is_yandex_disk_url(url)
+
+
+def is_yandex_disk_url(url):
+    """True, если URL — публичная ссылка Яндекс.Диска."""
     if not url:
         return False
-    return 'disk.yandex.ru' in url or 'yadi.sk' in url
+    text = str(url).strip().lower()
+    return 'disk.yandex.ru' in text or 'yadi.sk' in text
+
+
+def is_direct_http_video_url(url):
+    """
+    True для прямой HTTP(S) ссылки на файл (например Video Farm signed URL).
+    Яндекс.Диск сюда не входит — для него отдельный путь через API.
+    """
+    if not url:
+        return False
+    text = str(url).strip()
+    if is_yandex_disk_url(text):
+        return False
+    lower = text.lower()
+    return lower.startswith('https://') or lower.startswith('http://')
+
+
+def validate_video_url(url):
+    """Принимает Яндекс.Диск или прямой HTTP(S) URL."""
+    return is_yandex_disk_url(url) or is_direct_http_video_url(url)
 
 
 def get_yandex_direct_download_url(public_url):
@@ -397,6 +333,26 @@ def get_yandex_direct_download_url(public_url):
             time.sleep(2)
 
 
+def _task_save_path(task) -> str:
+    temp_dir = settings.TEMP_VIDEO_DIR
+    os.makedirs(temp_dir, exist_ok=True)
+    return os.path.join(temp_dir, f'task_{task.id}.mp4')
+
+
+def _stream_download_to_file(url: str, save_path: str, timeout: int = 120) -> str:
+    """Скачивает URL потоком на диск. Возвращает save_path."""
+    response = requests.get(url, stream=True, timeout=timeout, allow_redirects=True)
+    response.raise_for_status()
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    with open(save_path, 'wb') as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                f.write(chunk)
+    if not os.path.isfile(save_path) or os.path.getsize(save_path) == 0:
+        raise Exception(f"Скачанный файл пуст или отсутствует: {save_path}")
+    return save_path
+
+
 def download_from_yandex(task) -> str:
     """
     Функция загрузки видео с Яндекс-диска.
@@ -411,28 +367,44 @@ def download_from_yandex(task) -> str:
     print(f'получаем прямую ссылку. Task ID{task.id}')
     direct_url = get_yandex_direct_download_url(public_url)
     print(f'получили прямую ссылку, начинаем скачивание.')
-    #Создаем папку, если её нет
-    temp_dir = settings.TEMP_VIDEO_DIR
-    os.makedirs(temp_dir, exist_ok=True)
-    save_path = os.path.join(temp_dir, f'task_{task.id}.mp4')
+    save_path = _task_save_path(task)
     # 2. Скачиваем файл
     try:
-        response = requests.get(direct_url, stream=True, timeout=60)
-        response.raise_for_status()
-
-        # Создаем папку, если её нет
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
-        # Скачиваем
-        with open(save_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-        print(f'скачали файл. path - {save_path}')
-        return save_path
-
+        result = _stream_download_to_file(direct_url, save_path, timeout=60)
+        print(f'скачали файл. path - {result}')
+        return result
     except requests.exceptions.RequestException as e:
         raise Exception(f"Ошибка при скачивании видео: {str(e)}")
+
+
+def download_from_http(task) -> str:
+    """
+    Скачивает видео по прямой HTTP(S) ссылке (Video Farm signed URL и т.п.).
+    Возвращает путь к скачанному файлу.
+    """
+    task.status = 'downloading'
+    task.save()
+    url = str(task.video_url).strip()
+    print(f'скачиваем HTTP видео. Task ID={task.id} url={url[:120]}')
+    save_path = _task_save_path(task)
+    try:
+        result = _stream_download_to_file(url, save_path, timeout=180)
+        print(f'скачали HTTP файл. path - {result}')
+        return result
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Ошибка при HTTP-скачивании видео: {str(e)}")
+
+
+def download_video(task) -> str:
+    """Диспетчер: Яндекс.Диск или прямой HTTP(S)."""
+    url = task.video_url
+    if is_yandex_disk_url(url):
+        return download_from_yandex(task)
+    if is_direct_http_video_url(url):
+        return download_from_http(task)
+    raise Exception(
+        f"Неподдерживаемый URL видео (нужен Яндекс.Диск или HTTP/HTTPS): {url}"
+    )
 
 
 def delete_video(file_path: str) -> bool:
@@ -477,16 +449,66 @@ def get_upload_url(file_type: str = "mp4") -> dict:
 
 
 def upload_video_to_storage(video_path: str, upload_url: str) -> None:
-    """Шаг 2: Загружаем видео в хранилище Geelark (PUT запрос)"""
+    """Шаг 2: Загружаем видео в хранилище Geelark (PUT запрос). С timeout против зависаний."""
+    timeout = int(getattr(settings, 'GEELARK_UPLOAD_TIMEOUT_SEC', 180))
     with open(video_path, 'rb') as f:
         # ВАЖНО: НИКАКИХ ДОПОЛНИТЕЛЬНЫХ ЗАГОЛОВКОВ!
-        response = requests.put(upload_url, data=f)
+        response = requests.put(upload_url, data=f, timeout=timeout)
 
     if response.status_code != 200:
         print(f"  ❌ Ошибка загрузки!")
         print(f"  Status code: {response.status_code}")
         print(f"  Response: {response.text[:500]}")
         raise Exception(f"Ошибка загрузки видео в хранилище: {response.status_code} - {response.text}")
+
+
+def upload_local_file_to_geelark_storage(video_path: str) -> str:
+    """getUrl + PUT + wait_for_geelark_resource → resourceUrl. Телефон не нужен."""
+    urls = get_upload_url('mp4')
+    upload_video_to_storage(video_path, urls['uploadUrl'])
+    wait_for_geelark_resource(urls['resourceUrl'])
+    return urls['resourceUrl']
+
+
+def create_geelark_publish_task(
+    env_id: str,
+    resource_url: str,
+    title: str,
+    comment: str,
+    publish_time,
+    social_network: str,
+) -> str:
+    """Создаёт RPA-задачу публикации. Возвращает geelark task id."""
+    schedule_timestamp = int(publish_time.timestamp()) if publish_time else int(time.time())
+    network = (social_network or '').lower()
+
+    if network == 'instagram':
+        return add_instagram_task(
+            env_id=env_id,
+            resource_url=resource_url,
+            schedule_at=schedule_timestamp,
+            description=comment,
+        )
+    if network == 'youtube':
+        youtube_title = str(title or '').strip()
+        if not youtube_title:
+            raise ValueError('Для YouTube нужен непустой заголовок.')
+        if len(youtube_title) > 100:
+            raise ValueError(
+                f'Заголовок YouTube слишком длинный: {len(youtube_title)} из 100 символов.'
+            )
+        return add_youtube_task(
+            env_id=env_id,
+            resource_url=resource_url,
+            schedule_at=schedule_timestamp,
+            title=youtube_title,
+        )
+    return add_tiktok_task(
+        env_id=env_id,
+        resource_url=resource_url,
+        schedule_at=schedule_timestamp,
+        description=comment,
+    )
 
 
 def add_publish_task(env_id: str, resource_url: str, schedule_at: int, comment: str = None, description: str = None,
@@ -518,7 +540,9 @@ def add_publish_task(env_id: str, resource_url: str, schedule_at: int, comment: 
 
     # Для YouTube добавляем comment
     if social_network and social_network.lower() == 'youtube' and comment:
-        task_data["comment"] = comment[:100]
+        if len(comment) > 100:
+            raise ValueError('Заголовок YouTube не может быть длиннее 100 символов.')
+        task_data["comment"] = comment
 
     payload = {
         "taskType": 1,
@@ -548,13 +572,11 @@ def add_tiktok_task(env_id: str, resource_url: str, schedule_at: int, descriptio
     print(f'api url completed')
     trace_id = str(uuid.uuid4()).upper()
     token = settings.GEELARK_TOKEN
-    print(f'token + id = {token}, {trace_id}')
     headers = {
         'Content-Type': 'application/json',
         'traceId': trace_id,
         'Authorization': f'Bearer {token}'
     }
-    print(f'headers? {headers}')
     # Формируем задачу строго по документации
     task_data = {
         "scheduleAt": schedule_at,
@@ -641,7 +663,7 @@ def add_instagram_task(env_id: str, resource_url: str, schedule_at: int, descrip
     return task_id
 
 
-def add_youtube_task(env_id: str, resource_url: str, schedule_at: int, comment: str) -> str:
+def add_youtube_task(env_id: str, resource_url: str, schedule_at: int, title: str) -> str:
     """Создание задачи для YouTube Video"""
     api_url = "https://openapi.geelark.com/open/v1/rpa/task/youtubePubShort"
     trace_id = str(uuid.uuid4()).upper()
@@ -652,7 +674,7 @@ def add_youtube_task(env_id: str, resource_url: str, schedule_at: int, comment: 
         'traceId': trace_id,
         'Authorization': f'Bearer {token}'
     }
-    safe_title = comment if comment and comment.strip() else "Auto publish"
+    safe_title = title if title and title.strip() else "Auto publish"
 
     payload = {
         "scheduleAt": schedule_at,
@@ -691,13 +713,11 @@ def add_youtube_task(env_id: str, resource_url: str, schedule_at: int, comment: 
 #    print(f'api url completed')
 #    trace_id = str(uuid.uuid4()).upper()
 #    token = settings.GEELARK_TOKEN
-#    print(f'token + id = {token}, {trace_id}')
 #    headers = {
 #        'Content-Type': 'application/json',
 #        'traceId': trace_id,
 #        'Authorization': f'Bearer {token}'
 #    }
-#    print(f'headers? {headers}')
 #    # Формируем задачу строго по документации
 #    task_data = {
 #        "scheduleAt": schedule_at,
@@ -735,81 +755,251 @@ def add_youtube_task(env_id: str, resource_url: str, schedule_at: int, comment: 
 #    return task_ids[0]
 
 
-def send_to_geelark(profile_id: str, video_path: str, comment: str, publish_time, social_network: str):
+
+def wait_for_geelark_resource(resource_url: str, timeout_seconds: int = 60) -> None:
+    """дёт, пока загруженное видео станет доступно GeeLark для чтения."""
+    deadline = time.monotonic() + timeout_seconds
+    last_error = ""
+
+    while time.monotonic() < deadline:
+        try:
+            response = requests.get(
+                resource_url,
+                headers={"Range": "bytes=0-0"},
+                stream=True,
+                timeout=15,
+            )
+            status_code = response.status_code
+            response.close()
+
+            if status_code in (200, 206):
+                print("идео подтверждено в хранилище GeeLark.")
+                return
+
+            last_error = f"HTTP {status_code}"
+        except requests.RequestException as exc:
+            last_error = str(exc)
+
+        time.sleep(2)
+
+    raise RuntimeError(
+        "идео не стало доступно в хранилище GeeLark за 60 секунд"
+        + (f": {last_error}" if last_error else "")
+    )
+
+
+def send_to_geelark(profile_id: str, video_path: str, title: str, comment: str, publish_time, social_network: str):
     """
-    Полный цикл отправки в Geelark
-    profile_id - это envId (ID облачного телефона)
-    social_network - Instagram, YouTube, TikTok
+    Полный цикл: storage upload + create task.
+    Телефон не стартуем здесь (см. scheduled-phone-timeout / watchdog).
     """
-    # 1. Получаем uploadUrl
-    print(f"Получаем uploadUrl от Geelark...")
-    urls = get_upload_url('mp4')
-
-    # 2. Загружаем видео в хранилище
-    print(f"Загружаем видео в хранилище Geelark...")
-    upload_video_to_storage(video_path, urls['uploadUrl'])
-    print(f" >>>> Видео загружено в хранилище")
-
-    # Ждем, пока файл станет доступен
-    print(f" >>>> Ожидаем доступности файла...")
-    time.sleep(3)
-
-    # 3. Создаем задачу на публикацию в зависимости от соцсети
+    print("Загружаем видео в хранилище Geelark...")
+    resource_url = upload_local_file_to_geelark_storage(video_path)
     print(f" >>> Создаем задачу публикации в Geelark для {social_network}...")
-    schedule_timestamp = int(publish_time.timestamp()) if publish_time else int(time.time())
-    print(f' >>> получили таймстамп - {schedule_timestamp}')
-
-
-    # Маршрутизация по соцсетям
-    if social_network.lower() == 'instagram':
-        print(f'Instagramm task, lets Go')
-        task_id = add_instagram_task(
-            env_id=profile_id,
-            resource_url=urls['resourceUrl'],
-            schedule_at=schedule_timestamp,
-            description=comment
-        )
-    elif social_network.lower() == 'youtube':
-        print(f'Получили данные. ПИШУ ИХ:')
-        print(f'TITLE - {comment}')
-        print(f'EVN ID - {profile_id}')
-        if len(str(comment)) > 100:
-            comment = str(comment)[:99]  # Берём первые 99 символов
-            print(f"⚠️ YouTube: комментарий был сокращён с {len(str(comment))} до 100 символов")
-            #raise ValueError(
-            #    f"YouTube: название видео слишком длинное ({len(str(comment))} > 100 символов). Сократите название до 100 символов.")
-        task_id = add_youtube_task(
-            env_id=profile_id,
-            resource_url=urls['resourceUrl'],
-            schedule_at=schedule_timestamp,
-            comment=comment,
-            #description=title
-            #description=comment
-        )
-    else:  # TikTok (по умолчанию)
-        print(f'TikTok task lets GO')
-        task_id = add_tiktok_task(
-            env_id=profile_id,
-            resource_url=urls['resourceUrl'],
-            schedule_at=schedule_timestamp,
-            description=comment
-        )
-
-    #task_id = add_publish_task(
-    #    env_id=profile_id,
-    #    resource_url=urls['resourceUrl'],
-    #    schedule_at=schedule_timestamp,
-    #    title=title,
-    #    description=comment,
-    #    social_network=social_network
-    #)
+    task_id = create_geelark_publish_task(
+        env_id=profile_id,
+        resource_url=resource_url,
+        title=title,
+        comment=comment,
+        publish_time=publish_time,
+        social_network=social_network,
+    )
     print(f"✅ Задача создана, taskId: {task_id}")
-
     return {
         'success': True,
         'task_id': task_id,
-        'resource_url': urls['resourceUrl']
+        'resource_url': resource_url,
     }
+
+
+def query_geelark_task_statuses(task_ids):
+    """Возвращает актуальные статусы задач GeeLark, сгруппированные по task ID."""
+    unique_ids = list(dict.fromkeys(str(task_id) for task_id in task_ids if task_id))
+    if not unique_ids:
+        return {}
+
+    api_url = "https://openapi.geelark.com/open/v1/task/query"
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {settings.GEELARK_TOKEN}',
+    }
+    tasks_by_id = {}
+
+    # GeeLark принимает не более 100 ID за один запрос.
+    for start in range(0, len(unique_ids), 100):
+        chunk = unique_ids[start:start + 100]
+        request_headers = {**headers, 'traceId': str(uuid.uuid4()).upper()}
+        response = requests.post(
+            api_url,
+            json={'ids': chunk},
+            headers=request_headers,
+            timeout=30,
+        )
+        response.raise_for_status()
+        result = response.json()
+
+        if result.get('code') != 0:
+            raise RuntimeError(
+                f"GeeLark не вернул статусы задач: {result.get('msg') or 'неизвестная ошибка'}"
+            )
+
+        for item in result.get('data', {}).get('items', []):
+            task_id = str(item.get('id') or '')
+            if task_id:
+                tasks_by_id[task_id] = item
+
+    return tasks_by_id
+
+
+def _geelark_api_post(path, payload):
+    """Send a GeeLark API request without logging credentials or payloads."""
+    token = settings.GEELARK_TOKEN
+    if not token:
+        raise RuntimeError('GeeLark API token is not configured')
+
+    response = requests.post(
+        f'https://openapi.geelark.com/open/v1{path}',
+        json=payload,
+        headers={
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {token}',
+            'traceId': str(uuid.uuid4()).upper(),
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def _safe_geelark_message(payload, default):
+    if not isinstance(payload, dict):
+        return default
+    message = payload.get('msg') or payload.get('message')
+    return str(message) if message else default
+
+
+
+def cancel_geelark_task(task_id: str) -> bool:
+    """Requests cancellation of a waiting or running GeeLark automation task."""
+    result = _geelark_api_post('/task/cancel', {'ids': [str(task_id)]})
+    if result.get('code') != 0:
+        return False
+    data = result.get('data') or {}
+    return bool(data.get('successAmount', 0))
+
+
+def rotate_geelark_proxy_port(profile_id):
+    """Move a profile proxy to the next provider port after GeeLark error 29996.
+
+    The failed publication is deliberately not retried: retrying may create a
+    duplicate video.  Passwords are only passed in memory to GeeLark and are
+    never returned, logged, or stored by this application.
+    """
+    if not settings.GEELARK_PROXY_AUTO_ROTATE:
+        return {
+            'changed': False,
+            'message': 'Автосмена порта прокси отключена в настройках сервиса.',
+        }
+
+    port_min = settings.GEELARK_PROXY_PORT_MIN
+    port_max = settings.GEELARK_PROXY_PORT_MAX
+    attempts = settings.GEELARK_PROXY_ROTATE_ATTEMPTS
+    if port_min < 1 or port_max > 65535 or port_min > port_max or attempts < 1:
+        return {
+            'changed': False,
+            'message': 'Автосмена порта прокси не выполнена: неверно задан диапазон портов.',
+        }
+
+    try:
+        phones_payload = _geelark_api_post('/phone/list', {'ids': [str(profile_id)]})
+        if phones_payload.get('code') != 0:
+            return {
+                'changed': False,
+                'message': 'Автосмена порта прокси не выполнена: GeeLark не вернул настройки телефона.',
+            }
+
+        phones = (phones_payload.get('data') or {}).get('items') or []
+        if len(phones) != 1 or not isinstance(phones[0].get('proxy'), dict):
+            return {
+                'changed': False,
+                'message': 'Автосмена порта прокси не выполнена: у телефона не найдено подключённое прокси.',
+            }
+
+        phone_proxy = phones[0]['proxy']
+        scheme = str(phone_proxy.get('type') or '').lower()
+        server = str(phone_proxy.get('server') or '')
+        username = str(phone_proxy.get('username') or '')
+        password = phone_proxy.get('password') or ''
+        current_port = int(phone_proxy.get('port'))
+        if not (scheme and server and username and password):
+            return {
+                'changed': False,
+                'message': 'Автосмена порта прокси не выполнена: данные прокси телефона неполные.',
+            }
+
+        proxies_payload = _geelark_api_post('/proxy/list', {'page': 1, 'pageSize': 100})
+        if proxies_payload.get('code') != 0:
+            return {
+                'changed': False,
+                'message': 'Автосмена порта прокси не выполнена: GeeLark не вернул список прокси.',
+            }
+
+        proxies = (proxies_payload.get('data') or {}).get('list') or []
+        matches = [
+            proxy for proxy in proxies
+            if str(proxy.get('scheme') or '').lower() == scheme
+            and str(proxy.get('server') or '') == server
+            and str(proxy.get('username') or '') == username
+            and int(proxy.get('port') or 0) == current_port
+        ]
+        if len(matches) != 1:
+            return {
+                'changed': False,
+                'message': 'Автосмена порта прокси не выполнена: не удалось однозначно найти это прокси в GeeLark.',
+            }
+
+        saved_proxy = matches[0]
+        span = port_max - port_min + 1
+        max_attempts = min(attempts, span)
+        last_reason = 'GeeLark не подтвердил новый порт'
+        for offset in range(1, max_attempts + 1):
+            next_port = port_min + ((current_port - port_min + offset) % span)
+            update_payload = _geelark_api_post('/proxy/update', {
+                'list': [{
+                    'id': saved_proxy['id'],
+                    'scheme': scheme,
+                    'server': server,
+                    'port': next_port,
+                    'username': username,
+                    'password': saved_proxy.get('password') or password,
+                }],
+            })
+            data = update_payload.get('data') or {}
+            if data.get('successAmount', 0):
+                return {
+                    'changed': True,
+                    'message': (
+                        f'Порт прокси автоматически изменён: {current_port} → {next_port}. '
+                        'Неудачная публикация автоматически не повторялась.'
+                    ),
+                }
+            fail_details = data.get('failDetails') or []
+            last_reason = _safe_geelark_message(
+                fail_details[0] if fail_details else update_payload,
+                last_reason,
+            )
+
+        return {
+            'changed': False,
+            'message': (
+                f'Автосмена порта прокси не выполнена после {max_attempts} попыток: {last_reason}.'
+            ),
+        }
+    except (requests.RequestException, TypeError, ValueError, KeyError) as exc:
+        return {
+            'changed': False,
+            'message': f'Автосмена порта прокси не выполнена: {exc.__class__.__name__}.',
+        }
 
 
 def start_cloud_phone(env_id: str) -> bool:
@@ -861,7 +1051,7 @@ def check_phone_status(env_id: str) -> dict:
     token = settings.GEELARK_TOKEN
 
     headers = {
-        'Content-Type': 'application / json',
+        'Content-Type': 'application/json',
         'traceId': trace_id,
         'Authorization': f'Bearer {token}'
     }

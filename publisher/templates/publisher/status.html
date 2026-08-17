@@ -227,7 +227,7 @@
             color: #c05621;
         }
 
-        .status-downloading, .status-sending {
+        .status-downloading, .status-sending, .status-prepared, .status-submitted, .status-processing {
             background: #bee3f8;
             color: #2c5282;
         }
@@ -237,6 +237,18 @@
             font-size: 12px;
             color: #e53e3e;
             word-break: break-word;
+        }
+
+        .task-id {
+            margin-top: 5px;
+            font-size: 11px;
+            color: #718096;
+            word-break: break-all;
+        }
+
+        .profile-number-missing {
+            color: #718096;
+            font-size: 12px;
         }
 
         .empty-state {
@@ -276,6 +288,9 @@
                 <button class="btn btn-primary" onclick="location.reload()">
                     🔄 Обновить статус
                 </button>
+                <button class="btn btn-secondary" id="syncGeeLarkButton" onclick="syncGeeLarkStatuses()">
+                    🔎 Проверить результаты GeeLark
+                </button>
                 <button class="btn btn-secondary" onclick="window.location.href='/'">
                     📤 Загрузить новый файл
                 </button>
@@ -290,7 +305,7 @@
                 <thead>
                     <tr>
                         <th>ID</th>
-                        <th>Профиль</th>
+                        <th>Телефон</th>
                         <th>Соцсеть</th>
                         <th>Название</th>
                         <th>Время публикации</th>
@@ -350,7 +365,15 @@
             const statsHtml = `
                 <div class="stat success">
                     <div class="stat-number">${data.stats.success}</div>
-                    <div class="stat-label">✅ Успешно</div>
+                    <div class="stat-label">✅ Выполнено в GeeLark</div>
+                </div>
+                <div class="stat total">
+                    <div class="stat-number">${data.stats.submitted || 0}</div>
+                    <div class="stat-label">📤 Ожидает запуска</div>
+                </div>
+                <div class="stat total">
+                    <div class="stat-number">${data.stats.in_progress || 0}</div>
+                    <div class="stat-label">⚙️ Выполняется</div>
                 </div>
                 <div class="stat error">
                     <div class="stat-number">${data.stats.error}</div>
@@ -382,14 +405,20 @@
             tasksBody.innerHTML = data.tasks.map(task => `
                 <tr>
                     <td>${task.id}</td>
-                    <td><code>${escapeHtml(task.profile_id)}</code></td>
+                    <td>
+                        ${task.profile_number
+                            ? `<strong>№ ${escapeHtml(task.profile_number)}</strong>`
+                            : '<span class="profile-number-missing">Номер не указан</span>'}
+                        <div class="task-id">GeeLark ID: ${escapeHtml(task.profile_id)}</div>
+                    </td>
                     <td>${escapeHtml(task.social_network)}</td>
-                    <td title="${escapeHtml(task.comment || '')}">${escapeHtml((task.comment || '').substring(0, 40))}${(task.comment || '').length > 40 ? '...' : ''}</td>
+                    <td title="${escapeHtml(task.title || task.comment || '')}">${escapeHtml((task.title || task.comment || '').substring(0, 40))}${(task.title || task.comment || '').length > 40 ? '...' : ''}</td>
                     <td>${task.publish_time_formatted || '-'}</td>
                     <td>
                         <span class="status-badge status-${task.status}">
                             ${getStatusIcon(task.status)} ${task.status_display}
                         </span>
+                        ${task.geelark_task_id ? `<div class="task-id">GeeLark ID: ${escapeHtml(task.geelark_task_id)}</div>` : ''}
                     </td>
                     <td class="error-message">${escapeHtml(task.error_message || '')}</td>
                 </tr>
@@ -402,6 +431,8 @@
                 'error': '❌',
                 'downloading': '📥',
                 'sending': '📤',
+                'submitted': '📤',
+                'processing': '⚙️',
                 'pending': '⏳'
             };
             return icons[status] || '⏳';
@@ -417,6 +448,53 @@
         function showError(message) {
             const tasksBody = document.getElementById('tasksBody');
             tasksBody.innerHTML = `<tr><td colspan="7" class="empty-state">❌ ${message}</td></tr>`;
+        }
+
+        async function syncGeeLarkStatuses() {
+            const button = document.getElementById('syncGeeLarkButton');
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = '⏳ Проверяем GeeLark...';
+
+            try {
+                const response = await fetch(`/api/status/${sessionId}/sync-geelark/`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': getCookie('csrftoken')
+                    }
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Не удалось получить статусы GeeLark');
+                }
+
+                updateUI(data);
+                const sync = data.sync || {};
+                button.textContent = `✅ Проверено: ${sync.checked || 0}`;
+            } catch (error) {
+                button.textContent = '❌ Ошибка проверки';
+                showError(error.message);
+            } finally {
+                setTimeout(() => {
+                    button.disabled = false;
+                    button.textContent = originalText;
+                }, 2000);
+            }
+        }
+
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                for (const cookie of document.cookie.split(';')) {
+                    const trimmed = cookie.trim();
+                    if (trimmed.startsWith(`${name}=`)) {
+                        cookieValue = decodeURIComponent(trimmed.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
         }
 
         // Запускаем загрузку статуса
