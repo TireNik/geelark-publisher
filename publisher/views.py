@@ -21,6 +21,8 @@ from .utils import (
     rotate_geelark_proxy_port,
     split_profile_reference,
 )
+from .phone_guard import mark_phone_stopped, stop_phone_if_idle
+from .videofarm_callback import extract_share_link, notify_videofarm_share_link
 from .serializers import UploadSessionSerializer, PublicationTaskSerializer
 
 
@@ -273,6 +275,11 @@ def sync_geelark_statuses(sessions, force=False):
             task.geelark_status = external_status
             task.geelark_checked_at = checked_at
             update_fields = ['geelark_status', 'geelark_checked_at']
+            became_terminal = False
+            share_link = extract_share_link(external)
+            if share_link and share_link != (task.share_link or ''):
+                task.share_link = share_link
+                update_fields.append('share_link')
 
             if task.status == 'stopping':
                 if external_status in (4, 7):
@@ -298,6 +305,7 @@ def sync_geelark_statuses(sessions, force=False):
                 task.error_message = ''
                 task.geelark_fail_code = None
                 task.processed_at = checked_at
+                became_terminal = True
                 update_fields.extend(['status', 'error_message', 'geelark_fail_code', 'processed_at'])
             elif external_status in (4, 7):
                 task.status = 'error'
@@ -309,6 +317,10 @@ def sync_geelark_statuses(sessions, force=False):
                 )
                 if str(task.geelark_fail_code) == '29996':
                     profile_key = str(task.profile_id)
+                    if stop_phone_if_idle(profile_key, exclude_task_id=task.id):
+                        task.phone_stopped_at = checked_at
+                        update_fields.append('phone_stopped_at')
+                        mark_phone_stopped(profile_key, checked_at)
                     if profile_key not in proxy_rotation_results:
                         proxy_rotation_results[profile_key] = rotate_geelark_proxy_port(profile_key)
                     task.error_message = (
@@ -317,6 +329,7 @@ def sync_geelark_statuses(sessions, force=False):
                     )
 
                 task.processed_at = checked_at
+                became_terminal = True
                 update_fields.extend([
                     'status', 'geelark_fail_code', 'error_message', 'processed_at'
                 ])
@@ -325,6 +338,13 @@ def sync_geelark_statuses(sessions, force=False):
 
             task.save(update_fields=update_fields)
             updated += 1
+            if share_link:
+                notify_videofarm_share_link(task.video_url, share_link, task.social_network)
+            if became_terminal and stop_phone_if_idle(task.profile_id, exclude_task_id=task.id):
+                mark_phone_stopped(task.profile_id, checked_at)
+                if not task.phone_stopped_at:
+                    task.phone_stopped_at = checked_at
+                    task.save(update_fields=['phone_stopped_at'])
 
     for session in sessions:
         refresh_session_status(session)

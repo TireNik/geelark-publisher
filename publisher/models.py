@@ -108,7 +108,7 @@ class PublicationTask(models.Model):
     profile_number = models.CharField(max_length=32, blank=True, default='', verbose_name='Номер телефона')
     profile_id = models.CharField(max_length=64, verbose_name='Номер профиля')
     social_network = models.CharField(max_length=32, verbose_name='Соцсеть')
-    video_url = models.URLField(verbose_name='Ссылка на видео')
+    video_url = models.URLField(max_length=2048, verbose_name='Ссылка на видео')
     title = models.CharField(max_length=255, blank=True, default='', verbose_name='Название видео')
     comment = models.TextField(verbose_name='Комментарий')
     publish_time = models.DateTimeField(verbose_name='Время публикации')
@@ -138,6 +138,8 @@ class PublicationTask(models.Model):
 
     geelark_started_at = models.DateTimeField(blank=True, null=True)
     geelark_cancel_requested_at = models.DateTimeField(blank=True, null=True)
+    share_link = models.TextField(blank=True, default='', verbose_name='Ссылка публикации GeeLark')
+    phone_stopped_at = models.DateTimeField(blank=True, null=True)
 
     # Метрики длительности / размера (prepare→submit; телефон стартует вне воркера)
     file_size_bytes = models.BigIntegerField(null=True, blank=True)

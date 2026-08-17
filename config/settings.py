@@ -104,7 +104,11 @@ GEELARK_PROXY_PORT_MIN = int(os.environ.get('GEELARK_PROXY_PORT_MIN', '10000'))
 GEELARK_PROXY_PORT_MAX = int(os.environ.get('GEELARK_PROXY_PORT_MAX', '10999'))
 GEELARK_PROXY_ROTATE_ATTEMPTS = int(os.environ.get('GEELARK_PROXY_ROTATE_ATTEMPTS', '3'))
 
-GEELARK_TASK_TIMEOUT_MINUTES = int(os.environ.get('GEELARK_TASK_TIMEOUT_MINUTES', '15'))
+GEELARK_TASK_TIMEOUT_MINUTES = int(os.environ.get('GEELARK_TASK_TIMEOUT_MINUTES', '8'))
+
+# Video Farm: POST shareLink for /publish/stats (Excel col C = signed final URL)
+VF_SHARELINK_URL = os.environ.get('VF_SHARELINK_URL', '').strip()
+VF_SHARELINK_TOKEN = os.environ.get('VF_SHARELINK_TOKEN', '').strip()
 
 # Параллельный prepare/publish и защита от зависаний (см. docs/upload-cost-optimization.md)
 GEELARK_MAX_PARALLEL = int(os.environ.get('GEELARK_MAX_PARALLEL', '3'))

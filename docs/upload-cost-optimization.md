@@ -32,8 +32,11 @@
 ```text
 prepare (parallel): download → PUT storage → wait resource → delete local mp4
 publish (parallel): create RPA task → status=submitted
-watchdog/sync: processing → success|error; stop phones при timeout
+watchdog/sync: processing → success|error; stop phones на терминальном статусе и idle reaper
+shareLink: task/query → POST Video Farm /api/public/publish/share-link
 ```
+
+HTTP URL из Video Farm (колонка C) принимается; `video_url` max_length=2048.
 
 ## Конфиг
 

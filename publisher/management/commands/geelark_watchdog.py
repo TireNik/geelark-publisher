@@ -5,6 +5,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from publisher.models import PublicationTask, UploadSession, refresh_session_status
+from publisher.phone_guard import reap_idle_phones
 from publisher.utils import cancel_geelark_task, stop_cloud_phone
 from publisher.views import sync_geelark_statuses
 
@@ -33,7 +34,7 @@ class Command(BaseCommand):
         ):
             another_task_is_active = PublicationTask.objects.filter(
                 profile_id=task.profile_id,
-                status__in=['submitted', 'processing'],
+                status__in=['sending', 'submitted', 'processing'],
             ).exclude(id=task.id).exists()
 
             if another_task_is_active:
@@ -58,7 +59,7 @@ class Command(BaseCommand):
             else:
                 task.status = 'error'
                 if not task.error_message:
-                    task.error_message = 'GeeLark: задача отменена после превышения 15 минут.'
+                    task.error_message = 'GeeLark: задача отменена после превышения лимита времени.'
                 task.save(update_fields=['status', 'error_message', 'processed_at'])
             stopped += 1
 
@@ -92,8 +93,11 @@ class Command(BaseCommand):
         for session in sessions:
             refresh_session_status(session)
 
+        idle_stopped = reap_idle_phones()
+
         self.stdout.write(
             self.style.SUCCESS(
-                f'роверка завершена: отменено {cancelled}, остановлено телефонов {stopped}.'
+                f'Проверка завершена: отменено {cancelled}, '
+                f'остановлено телефонов {stopped}, idle {idle_stopped}.'
             )
         )

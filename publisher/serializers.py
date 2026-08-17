@@ -69,6 +69,8 @@ class PublicationTaskSerializer(serializers.ModelSerializer):
             'geelark_checked_at',
             'geelark_cancel_requested_at',
             'geelark_started_at',
+            'share_link',
+            'phone_stopped_at',
             'attempt_count',
             'created_at',
             'processed_at',

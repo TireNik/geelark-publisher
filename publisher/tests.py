@@ -23,6 +23,13 @@ class VideoUrlValidationTests(SimpleTestCase):
         self.assertTrue(is_direct_http_video_url(vf))
         self.assertTrue(validate_video_url(vf))
         self.assertTrue(validate_video_url('http://localhost:8080/api/public/media/jobs/1/final?token=t'))
+        long_token = 'a' * 180
+        long_vf = (
+            'https://ozon-panel.ru/video-farm/api/public/media/jobs/2630/final'
+            f'?token={long_token}'
+        )
+        self.assertTrue(validate_video_url(long_vf))
+        self.assertGreater(len(long_vf), 200)
         self.assertFalse(is_yandex_disk_url(vf))
 
     def test_rejects_invalid(self):
