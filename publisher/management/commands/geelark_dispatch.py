@@ -7,6 +7,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from publisher import utils as u
+from publisher.cost_guard import skip_dispatch_reason
 from publisher.models import PublicationTask, refresh_session_status
 
 
@@ -40,6 +41,22 @@ class Command(BaseCommand):
                 )
 
                 if task.status != "prepared":
+                    continue
+
+                fail_pairs = list(
+                    task.session.tasks.exclude(geelark_fail_code=None).values_list(
+                        "geelark_fail_code", "profile_id"
+                    )
+                )
+                skip_reason = skip_dispatch_reason(task.profile_id, fail_pairs)
+                if skip_reason:
+                    task.status = "error"
+                    task.error_message = f"GeeLark: {skip_reason}"
+                    task.processed_at = now
+                    task.save(update_fields=["status", "error_message", "processed_at"])
+                    refresh_session_status(task.session)
+                    failed += 1
+                    self.stderr.write(f"Задача {task.id}: пропуск — {skip_reason}")
                     continue
 
                 task.status = "sending"

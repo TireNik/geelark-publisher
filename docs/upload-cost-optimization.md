@@ -25,6 +25,7 @@
 | Timeout на PUT | против «висит upload» |
 | Метрики `t_*_ms`, `file_size_bytes`, `resource_url` | ловить затыки; p50/p95 в status API |
 | SLA wall-clock на prepare/publish | abort зависшей задачи |
+| `cost_guard`: stop → 1× rotate; abort 29996/20116 | не крутить прокси на живом телефоне; не жечь пачку как 14.08 |
 | Fix `Content-Type` в `check_phone_status` | `'application/json'` без пробелов |
 
 ## Поток
@@ -32,7 +33,9 @@
 ```text
 prepare (parallel): download → PUT storage → wait resource → delete local mp4
 publish (parallel): create RPA task → status=submitted
-watchdog/sync: processing → success|error; stop phones на терминальном статусе и idle reaper
+watchdog/sync: processing → success|error; сразу гасим телефон + idle reaper
+29996: abort хвоста телефона → stop phone → одна смена порта; ≥3 в сессии → abort остальных
+20116: не стартуем остальные сети на этом телефоне
 shareLink: task/query (`shareLink`); если пусто — логи task/detail → сохранить → POST Video Farm /api/public/publish/share-link
 ```
 
@@ -43,5 +46,6 @@ HTTP URL из Video Farm (колонка C) принимается; `video_url` 
 ## Конфиг
 
 См. `.env.example`: `GEELARK_MAX_PARALLEL`, `GEELARK_UPLOAD_TIMEOUT_SEC`,
-`GEELARK_DOWNLOAD_TIMEOUT_SEC`, `GEELARK_TASK_SLA_SEC` (+ уже существующий
-`GEELARK_TASK_TIMEOUT_MINUTES` для watchdog).
+`GEELARK_DOWNLOAD_TIMEOUT_SEC`, `GEELARK_TASK_SLA_SEC`,
+`GEELARK_TASK_TIMEOUT_MINUTES=8`, `GEELARK_PROXY_ROTATE_ATTEMPTS=1`,
+`GEELARK_PROXY_FAIL_ABORT_THRESHOLD=3`.

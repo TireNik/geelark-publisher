@@ -933,6 +933,9 @@ def cancel_geelark_task(task_id: str) -> bool:
 def rotate_geelark_proxy_port(profile_id):
     """Move a profile proxy to the next provider port after GeeLark error 29996.
 
+    Call this only after the cloud phone is stopped so GeeLark proxy checks
+    do not keep the PAYG mobile proxy busy. One attempt by default.
+
     The failed publication is deliberately not retried: retrying may create a
     duplicate video.  Passwords are only passed in memory to GeeLark and are
     never returned, logged, or stored by this application.

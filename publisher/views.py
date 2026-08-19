@@ -20,9 +20,9 @@ from .utils import (
     convert_social_networks,
     query_geelark_task_statuses,
     query_geelark_task_detail,
-    rotate_geelark_proxy_port,
     split_profile_reference,
 )
+from .cost_guard import apply_fail_side_effects
 from .phone_guard import mark_phone_stopped, stop_phone_if_idle
 from .videofarm_callback import notify_videofarm_share_link, resolve_published_share_link
 from .serializers import UploadSessionSerializer, PublicationTaskSerializer
@@ -344,18 +344,13 @@ def sync_geelark_statuses(sessions, force=False):
                     f"GeeLark: {reason}"
                     + (f" (код {task.geelark_fail_code})" if task.geelark_fail_code else '')
                 )
-                if str(task.geelark_fail_code) == '29996':
-                    profile_key = str(task.profile_id)
-                    if stop_phone_if_idle(profile_key, exclude_task_id=task.id):
-                        task.phone_stopped_at = checked_at
-                        update_fields.append('phone_stopped_at')
-                        mark_phone_stopped(profile_key, checked_at)
-                    if profile_key not in proxy_rotation_results:
-                        proxy_rotation_results[profile_key] = rotate_geelark_proxy_port(profile_key)
-                    task.error_message = (
-                        f"{task.error_message}. "
-                        f"{proxy_rotation_results[profile_key]['message']}"
-                    )
+                fail_note = apply_fail_side_effects(
+                    task, checked_at, proxy_rotation_results
+                )
+                if fail_note:
+                    task.error_message = f"{task.error_message}. {fail_note}"
+                if getattr(task, 'phone_stopped_at', None) and 'phone_stopped_at' not in update_fields:
+                    update_fields.append('phone_stopped_at')
 
                 task.processed_at = checked_at
                 became_terminal = True
