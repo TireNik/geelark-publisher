@@ -1,6 +1,7 @@
 import threading
 from datetime import datetime, timedelta
 
+from django.db.models import Q
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.contrib import messages
@@ -18,11 +19,12 @@ from .utils import (
     parse_publish_time,
     convert_social_networks,
     query_geelark_task_statuses,
+    query_geelark_task_detail,
     rotate_geelark_proxy_port,
     split_profile_reference,
 )
 from .phone_guard import mark_phone_stopped, stop_phone_if_idle
-from .videofarm_callback import extract_share_link, notify_videofarm_share_link
+from .videofarm_callback import notify_videofarm_share_link, resolve_published_share_link
 from .serializers import UploadSessionSerializer, PublicationTaskSerializer
 from .json_ingest import JsonIngestView, JsonIngestTestView  # noqa: F401  — urls.py
 
@@ -233,11 +235,20 @@ def sync_geelark_statuses(sessions, force=False):
     if not sessions:
         return {'checked': 0, 'updated': 0, 'not_returned': 0}
 
-    tasks = list(
-        PublicationTask.objects.filter(session__in=sessions)
-        .exclude(geelark_task_id='')
-        .exclude(status__in=['success', 'error'])
+    open_q = (
+        Q(session__in=sessions)
+        & ~Q(geelark_task_id='')
+        & ~Q(status__in=['success', 'error'])
     )
+    task_q = open_q
+    if hasattr(PublicationTask, 'share_link'):
+        task_q = open_q | (
+            Q(session__in=sessions)
+            & Q(status='success')
+            & Q(share_link='')
+            & ~Q(geelark_task_id='')
+        )
+    tasks = list(PublicationTask.objects.filter(task_q))
     if not force:
         refresh_after = timezone.now() - timedelta(seconds=20)
         tasks = [
@@ -277,10 +288,23 @@ def sync_geelark_statuses(sessions, force=False):
             task.geelark_checked_at = checked_at
             update_fields = ['geelark_status', 'geelark_checked_at']
             became_terminal = False
-            share_link = extract_share_link(external)
-            if share_link and share_link != (task.share_link or ''):
+            previous_share = getattr(task, 'share_link', '') or ''
+            share_link = resolve_published_share_link(
+                external,
+                detail_loader=lambda tid=task.geelark_task_id: query_geelark_task_detail(tid),
+            )
+            if share_link and share_link != previous_share and hasattr(task, 'share_link'):
                 task.share_link = share_link
                 update_fields.append('share_link')
+
+            if task.status in ('success', 'error'):
+                task.save(update_fields=update_fields)
+                updated += 1
+                if share_link and share_link != previous_share:
+                    notify_videofarm_share_link(
+                        task.video_url, share_link, task.social_network
+                    )
+                continue
 
             if task.status == 'stopping':
                 if external_status in (4, 7):
@@ -288,6 +312,10 @@ def sync_geelark_statuses(sessions, force=False):
                     update_fields.append('geelark_fail_code')
                 task.save(update_fields=update_fields)
                 updated += 1
+                if share_link and share_link != previous_share:
+                    notify_videofarm_share_link(
+                        task.video_url, share_link, task.social_network
+                    )
                 continue
 
             if external_status == 1:
@@ -339,7 +367,7 @@ def sync_geelark_statuses(sessions, force=False):
 
             task.save(update_fields=update_fields)
             updated += 1
-            if share_link:
+            if share_link and share_link != previous_share:
                 notify_videofarm_share_link(task.video_url, share_link, task.social_network)
             if became_terminal and stop_phone_if_idle(task.profile_id, exclude_task_id=task.id):
                 mark_phone_stopped(task.profile_id, checked_at)

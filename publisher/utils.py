@@ -859,6 +859,40 @@ def query_geelark_task_statuses(task_ids):
     return tasks_by_id
 
 
+def query_geelark_task_detail(task_id: str) -> dict:
+    """Task Detail: logs and screenshots after completion (GeeLark /task/detail).
+
+    shareLink on /task/query is often empty for youtubePubShort (taskType 42)
+    and TikTok task/add (taskType 1). Logs are the documented fallback.
+    """
+    if not task_id:
+        return {}
+
+    payload = {'id': str(task_id)}
+    merged = {}
+    logs = []
+    for _ in range(20):
+        result = _geelark_api_post('/task/detail', payload)
+        if result.get('code') != 0:
+            raise RuntimeError(
+                f"GeeLark не вернул детали задачи: {result.get('msg') or 'неизвестная ошибка'}"
+            )
+        data = result.get('data') or {}
+        if not isinstance(data, dict):
+            return merged
+        if not merged:
+            merged = dict(data)
+        chunk = data.get('logs') or []
+        if isinstance(chunk, list):
+            logs.extend(chunk)
+        if data.get('logContinue') and data.get('searchAfter'):
+            payload = {'id': str(task_id), 'searchAfter': data.get('searchAfter')}
+            continue
+        break
+    merged['logs'] = logs
+    return merged
+
+
 def _geelark_api_post(path, payload):
     """Send a GeeLark API request without logging credentials or payloads."""
     token = settings.GEELARK_TOKEN

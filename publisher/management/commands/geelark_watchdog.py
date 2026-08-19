@@ -16,9 +16,18 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         sessions = list(
             UploadSession.objects.filter(
-                tasks__status__in=['processing', 'stopping']
+                tasks__status__in=['submitted', 'processing', 'stopping']
             ).distinct()
         )
+        if hasattr(PublicationTask, 'share_link'):
+            missing_link = list(
+                UploadSession.objects.filter(
+                    tasks__status='success',
+                    tasks__share_link='',
+                    tasks__processed_at__gte=timezone.now() - timedelta(hours=6),
+                ).exclude(tasks__geelark_task_id='').distinct()
+            )
+            sessions = list({session.id: session for session in sessions + missing_link}.values())
 
         if sessions:
             sync_geelark_statuses(sessions, force=True)
