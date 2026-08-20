@@ -8,8 +8,10 @@
 
 Фазы:
 1) prepare — download + PUT storage (без телефона), локальный файл сразу удаляем;
-   один URL → один resourceUrl (дедуп для YT+TT).
+   один URL → один resourceUrl (дедуп для YT+TT+IG). Excel и VF ingest
+   вызывают этот же worker.
 2) publish — только create RPA task (параллельно до GEELARK_MAX_PARALLEL).
+   Телефон на одном envId не гасим, пока другая сеть этой сессии ещё due.
 """
 from __future__ import annotations
 
@@ -19,7 +21,7 @@ import threading
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 from config import settings
 from django.db import close_old_connections
@@ -33,6 +35,14 @@ logger = logging.getLogger(__name__)
 
 def _cfg_int(name: str, default: int) -> int:
     return int(getattr(settings, name, default))
+
+
+def tasks_by_video_url(tasks: Iterable) -> Dict[str, List]:
+    """One GeeLark OSS PUT per URL — Excel and VF ingest both land here."""
+    grouped: Dict[str, List] = defaultdict(list)
+    for task in tasks:
+        grouped[str(task.video_url)].append(task)
+    return grouped
 
 
 def _safe_remove(path: Optional[str]) -> None:
@@ -160,9 +170,7 @@ def session_worker(session_id: int) -> None:
     max_parallel = max(1, min(3, _cfg_int("GEELARK_MAX_PARALLEL", 3)))
     sla_sec = _cfg_int("GEELARK_TASK_SLA_SEC", 900)
 
-    url_to_tasks: Dict[str, List[PublicationTask]] = defaultdict(list)
-    for task in tasks:
-        url_to_tasks[str(task.video_url)].append(task)
+    url_to_tasks: Dict[str, List[PublicationTask]] = tasks_by_video_url(tasks)
 
     prepared_by_url: Dict[str, Dict] = {}
 
@@ -181,14 +189,18 @@ def session_worker(session_id: int) -> None:
             )
             print(
                 f"prepare OK url={video_url[:80]}… "
-                f"size={prepared_by_url[video_url]['file_size_bytes']}"
+                f"size={prepared_by_url[video_url]['file_size_bytes']} "
+                f"networks={len(samples)}"
             )
         except Exception as exc:
             print(f"prepare FAIL url={video_url[:80]}…: {exc}")
             for t in samples:
                 _mark_error(t, f"prepare: {exc}", t0)
 
-    print(f"Сессия {session_id}: prepare {len(url_to_tasks)} URL, parallel={max_parallel}")
+    print(
+        f"Сессия {session_id}: prepare {len(url_to_tasks)} URL "
+        f"для {len(tasks)} задач (один PUT OSS на URL), parallel={max_parallel}"
+    )
     with ThreadPoolExecutor(max_workers=max_parallel) as pool:
         futs = [
             pool.submit(prepare_one, url, samples)

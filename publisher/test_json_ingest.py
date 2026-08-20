@@ -16,6 +16,7 @@ class ParseIngestItemTests(SimpleTestCase):
                 'videoUrl': 'https://ozon-panel.ru/video-farm/api/public/media/jobs/1/final?token=abc',
                 'title': 'Shorts title',
                 'comment': 'Description text',
+                'externalId': 'vf-entry-10',
             },
             0,
         )
@@ -25,6 +26,7 @@ class ParseIngestItemTests(SimpleTestCase):
         self.assertEqual(row['social_network'], 'YouTube')
         self.assertEqual(row['title'], 'Shorts title')
         self.assertEqual(row['comment'], 'Description text')
+        self.assertEqual(row['external_id'], 'vf-entry-10')
 
     def test_rejects_empty_profile(self):
         row, err = parse_ingest_item(

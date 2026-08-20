@@ -19,12 +19,10 @@ from .utils import (
     parse_publish_time,
     convert_social_networks,
     query_geelark_task_statuses,
-    query_geelark_task_detail,
     split_profile_reference,
 )
 from .cost_guard import apply_fail_side_effects
 from .phone_guard import mark_phone_stopped, stop_phone_if_idle
-from .videofarm_callback import notify_videofarm_share_link, resolve_published_share_link
 from .serializers import UploadSessionSerializer, PublicationTaskSerializer
 from .json_ingest import JsonIngestView, JsonIngestTestView  # noqa: F401  — urls.py
 
@@ -240,15 +238,7 @@ def sync_geelark_statuses(sessions, force=False):
         & ~Q(geelark_task_id='')
         & ~Q(status__in=['success', 'error'])
     )
-    task_q = open_q
-    if hasattr(PublicationTask, 'share_link'):
-        task_q = open_q | (
-            Q(session__in=sessions)
-            & Q(status='success')
-            & Q(share_link='')
-            & ~Q(geelark_task_id='')
-        )
-    tasks = list(PublicationTask.objects.filter(task_q))
+    tasks = list(PublicationTask.objects.filter(open_q))
     if not force:
         refresh_after = timezone.now() - timedelta(seconds=20)
         tasks = [
@@ -287,24 +277,14 @@ def sync_geelark_statuses(sessions, force=False):
             task.geelark_status = external_status
             task.geelark_checked_at = checked_at
             update_fields = ['geelark_status', 'geelark_checked_at']
+            raw_cost = external.get('cost')
+            if raw_cost is not None and hasattr(task, 'geelark_rpa_cost_sec'):
+                try:
+                    task.geelark_rpa_cost_sec = int(raw_cost)
+                    update_fields.append('geelark_rpa_cost_sec')
+                except (TypeError, ValueError):
+                    pass
             became_terminal = False
-            previous_share = getattr(task, 'share_link', '') or ''
-            share_link = resolve_published_share_link(
-                external,
-                detail_loader=lambda tid=task.geelark_task_id: query_geelark_task_detail(tid),
-            )
-            if share_link and share_link != previous_share and hasattr(task, 'share_link'):
-                task.share_link = share_link
-                update_fields.append('share_link')
-
-            if task.status in ('success', 'error'):
-                task.save(update_fields=update_fields)
-                updated += 1
-                if share_link and share_link != previous_share:
-                    notify_videofarm_share_link(
-                        task.video_url, share_link, task.social_network
-                    )
-                continue
 
             if task.status == 'stopping':
                 if external_status in (4, 7):
@@ -312,10 +292,6 @@ def sync_geelark_statuses(sessions, force=False):
                     update_fields.append('geelark_fail_code')
                 task.save(update_fields=update_fields)
                 updated += 1
-                if share_link and share_link != previous_share:
-                    notify_videofarm_share_link(
-                        task.video_url, share_link, task.social_network
-                    )
                 continue
 
             if external_status == 1:
@@ -362,8 +338,6 @@ def sync_geelark_statuses(sessions, force=False):
 
             task.save(update_fields=update_fields)
             updated += 1
-            if share_link and share_link != previous_share:
-                notify_videofarm_share_link(task.video_url, share_link, task.social_network)
             if became_terminal and stop_phone_if_idle(task.profile_id, exclude_task_id=task.id):
                 mark_phone_stopped(task.profile_id, checked_at)
                 if not task.phone_stopped_at:
@@ -407,13 +381,9 @@ class SessionsListAPIView(APIView):
     def get(self, request):
         sessions = list(UploadSession.objects.all().order_by('-uploaded_at')[:30])
 
-        # Главная страница сама актуализирует статусы видимых сессий.
-        # Если GeeLark временно недоступен, пользователю всё равно отдаётся
-        # последняя сохранённая информация.
-        try:
-            sync_geelark_statuses(sessions)
-        except Exception:
-            pass
+        # История — снимок из БД. Раньше GET /api/sessions/ синхронно звал
+        # sync_geelark_statuses (в т.ч. success без shareLink → N× task/detail)
+        # и отвечал минутами → nginx 504. Живые статусы обновляет watchdog.
 
         sessions_data = []
         for session in sessions:

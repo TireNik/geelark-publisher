@@ -149,6 +149,17 @@ class PublicationTask(models.Model):
     t_create_task_ms = models.IntegerField(null=True, blank=True)
     t_total_ms = models.IntegerField(null=True, blank=True)
     resource_url = models.TextField(blank=True, default='')
+    geelark_rpa_cost_sec = models.IntegerField(
+        null=True,
+        blank=True,
+        verbose_name='GeeLark task/query.cost (секунды RPA)',
+    )
+    external_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default='',
+        verbose_name='Внешний id (vf-entry-…)',
+    )
 
     class Meta:
         verbose_name = 'Задача на публикацию'

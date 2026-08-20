@@ -69,7 +69,6 @@ class PublicationTaskSerializer(serializers.ModelSerializer):
             'geelark_checked_at',
             'geelark_cancel_requested_at',
             'geelark_started_at',
-            'share_link',
             'phone_stopped_at',
             'attempt_count',
             'created_at',
@@ -80,6 +79,9 @@ class PublicationTaskSerializer(serializers.ModelSerializer):
             't_phone_start_ms',
             't_create_task_ms',
             't_total_ms',
+            'resource_url',
+            'geelark_rpa_cost_sec',
+            'external_id',
         ]
 
 

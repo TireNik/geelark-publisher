@@ -54,6 +54,9 @@ def parse_ingest_item(raw: dict, index: int) -> tuple[dict | None, dict | None]:
     profile_number, profile_id = split_profile_reference(profile_raw)
     if not profile_id:
         return None, {'index': index, 'error': 'profileId has empty GeeLark env id'}
+    external_id = str(
+        raw.get('externalId') or raw.get('external_id') or raw.get('name') or ''
+    ).strip()[:64]
     return {
         'profile_number': profile_number,
         'profile_id': profile_id,
@@ -61,6 +64,7 @@ def parse_ingest_item(raw: dict, index: int) -> tuple[dict | None, dict | None]:
         'video_url': video_url,
         'title': (title or comment)[:255],
         'comment': comment or title,
+        'external_id': external_id,
     }, None
 
 
@@ -170,6 +174,7 @@ class JsonIngestView(APIView):
                 title=row['title'],
                 comment=row['comment'],
                 publish_time=now,
+                external_id=row.get('external_id') or '',
             )
             for row in parsed
         ])

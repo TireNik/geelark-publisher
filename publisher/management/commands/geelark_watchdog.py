@@ -19,15 +19,8 @@ class Command(BaseCommand):
                 tasks__status__in=['submitted', 'processing', 'stopping']
             ).distinct()
         )
-        if hasattr(PublicationTask, 'share_link'):
-            missing_link = list(
-                UploadSession.objects.filter(
-                    tasks__status='success',
-                    tasks__share_link='',
-                    tasks__processed_at__gte=timezone.now() - timedelta(hours=6),
-                ).exclude(tasks__geelark_task_id='').distinct()
-            )
-            sessions = list({session.id: session for session in sessions + missing_link}.values())
+        # success без shareLink не крутим: статус — task/query на живых задачах,
+        # ссылку ищем harvest'ом, телефон ради shareLink не держим.
 
         if sessions:
             sync_geelark_statuses(sessions, force=True)

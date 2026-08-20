@@ -9,6 +9,7 @@ from django.utils import timezone
 from publisher import utils as u
 from publisher.cost_guard import skip_dispatch_reason
 from publisher.models import PublicationTask, refresh_session_status
+from publisher.phone_guard import profile_has_running_rpa
 
 
 class Command(BaseCommand):
@@ -31,6 +32,7 @@ class Command(BaseCommand):
 
         submitted = 0
         failed = 0
+        deferred = 0
 
         for task_id in task_ids:
             with transaction.atomic():
@@ -57,6 +59,13 @@ class Command(BaseCommand):
                     refresh_session_status(task.session)
                     failed += 1
                     self.stderr.write(f"Задача {task.id}: пропуск — {skip_reason}")
+                    continue
+
+                if profile_has_running_rpa(task.profile_id, exclude_id=task.id):
+                    deferred += 1
+                    self.stdout.write(
+                        f"Задача {task.id}: ждём, на телефоне {task.profile_id} уже идёт RPA."
+                    )
                     continue
 
                 task.status = "sending"
@@ -122,6 +131,7 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Отложенная отправка завершена: отправлено {submitted}, ошибок {failed}."
+                f"Отложенная отправка завершена: отправлено {submitted}, "
+                f"отложено {deferred}, ошибок {failed}."
             )
         )

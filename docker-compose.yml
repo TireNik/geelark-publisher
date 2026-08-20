@@ -4,7 +4,9 @@ services:
     container_name: geelark-publisher
     restart: always
     ports:
-      - "8000:8000"
+      # Только localhost: снаружи UI/ingest идут через nginx :80.
+      # Публичный 0.0.0.0:8000 даёт slowloris на sync-воркерах.
+      - "127.0.0.1:8000:8000"
     volumes:
       # Монтируем папки для сохранения данных (чтобы не терять при перезапуске)
       - ./data:/app/data          # SQLite база
@@ -14,7 +16,7 @@ services:
       - .env
     environment:
       - PYTHONPATH=/app
-    command: sh -c "python manage.py migrate --noinput && gunicorn --bind 0.0.0.0:8000 --timeout 600 --workers 2 config.wsgi:application"
+    command: sh -c "python manage.py migrate --noinput && gunicorn --bind 0.0.0.0:8000 --worker-class gthread --workers 3 --threads 4 --timeout 600 --keep-alive 5 config.wsgi:application"
 
   nginx:
     image: nginx:alpine

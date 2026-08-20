@@ -1,4 +1,9 @@
-"""Push GeeLark shareLink back to Video Farm for publication stats."""
+"""Legacy GeeLark shareLink → VF callback.
+
+Not used by sync_geelark_statuses: publication stats come from ig-stats /
+hashtag harvest, not GeeLark shareLink (usually empty on youtubePubShort).
+Kept for tests and a possible one-off backfill.
+"""
 import logging
 import re
 

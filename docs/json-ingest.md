@@ -22,7 +22,7 @@
 HEAD каждого `videoUrl`, без сессии и без телефонов.  
 Нужен, чтобы проверить, что GeeLark-сервер видит Video Farm, не тратя минуты прокси. На публичной странице загрузки кнопки нет.
 
-После публикации sync статусов берёт ссылку из GeeLark `POST /open/v1/task/query` (`shareLink`). Если поле пустое при status=3 — смотрит логи `POST /open/v1/task/detail`. URL сохраняется в `PublicationTask.share_link` и уходит в VF `POST /api/public/publish/share-link` (тот же токен). Watchdog синкает ещё `submitted` и success без ссылки (6 часов).
+Статус GeeLark: `POST /open/v1/task/query` (`status`, `failCode`, `cost`). Ссылку публикации из `shareLink` **не берём** — на youtubePubShort поле почти всегда пустое; статистика идёт через ig-stats / hashtag `#vf_<jobId>`. VF `POST /api/public/publish/share-link` publisher больше не вызывает.
 
 ### live
 
