@@ -1,10 +1,10 @@
 # Минуты облачного телефона
 
-Ветка: `feature/geelark-device-minutes`
+Ветка влита в `main` (`c5c0cf5`). Прод 77.222 выкатили 2026-08-20 аддитивно (бэкап `.bak-device-minutes-20260820-121041`, rebuild `app`+`watchdog`, миграции 0011/0012).
 
 Полный разбор и чеклист: Video Farm `docs/architecture/geelark-device-minutes.md`.
 
-Сделано в этом репо (не на проде 77.222):
+Сделано в этом репо и на проде 77.222:
 
 - Excel (`POST /api/upload/`) и VF (`POST /api/ingest/`) → один `session_worker`: один PUT OSS на `video_url`.
 - `phone_guard`: не `stop`, пока на том же `profile_id` есть running RPA или `prepared`/`pending` с `publish_time` в окне `GEELARK_DISPATCH_LEAD_SECONDS` (две сети на одном устройстве без второго boot).
