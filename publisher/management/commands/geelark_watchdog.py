@@ -5,7 +5,11 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from publisher.models import PublicationTask, UploadSession, refresh_session_status
-from publisher.phone_guard import reap_idle_phones
+from publisher.phone_guard import (
+    profile_has_running_rpa,
+    reap_idle_phones,
+    reap_zombie_running_tasks,
+)
 from publisher.utils import cancel_geelark_task, stop_cloud_phone
 from publisher.views import sync_geelark_statuses
 
@@ -14,6 +18,8 @@ class Command(BaseCommand):
     help = 'Cancels GeeLark tasks exceeding the time limit and stops their phones.'
 
     def handle(self, *args, **options):
+        zombies = reap_zombie_running_tasks()
+
         sessions = list(
             UploadSession.objects.filter(
                 tasks__status__in=['submitted', 'processing', 'stopping']
@@ -34,12 +40,7 @@ class Command(BaseCommand):
             status='stopping',
             geelark_status__in=[3, 4, 7],
         ):
-            another_task_is_active = PublicationTask.objects.filter(
-                profile_id=task.profile_id,
-                status__in=['sending', 'submitted', 'processing'],
-            ).exclude(id=task.id).exists()
-
-            if another_task_is_active:
+            if profile_has_running_rpa(task.profile_id, exclude_id=task.id, now=now):
                 continue
 
             try:
@@ -99,7 +100,7 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                f'Проверка завершена: отменено {cancelled}, '
+                f'Проверка завершена: зомби {zombies}, отменено {cancelled}, '
                 f'остановлено телефонов {stopped}, idle {idle_stopped}.'
             )
         )

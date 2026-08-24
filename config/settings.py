@@ -121,3 +121,5 @@ GEELARK_UPLOAD_TIMEOUT_SEC = int(os.environ.get('GEELARK_UPLOAD_TIMEOUT_SEC', '1
 GEELARK_DOWNLOAD_TIMEOUT_SEC = int(os.environ.get('GEELARK_DOWNLOAD_TIMEOUT_SEC', '180'))
 GEELARK_TASK_SLA_SEC = int(os.environ.get('GEELARK_TASK_SLA_SEC', '900'))
 GEELARK_DISPATCH_LEAD_SECONDS = int(os.environ.get('GEELARK_DISPATCH_LEAD_SECONDS', '120'))
+# sending без geelark_task_id дольше этого → зомби (не блокирует телефон)
+GEELARK_SENDING_ZOMBIE_SECONDS = int(os.environ.get('GEELARK_SENDING_ZOMBIE_SECONDS', '600'))

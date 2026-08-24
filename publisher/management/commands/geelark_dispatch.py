@@ -69,7 +69,8 @@ class Command(BaseCommand):
                     continue
 
                 task.status = "sending"
-                task.save(update_fields=["status"])
+                task.processed_at = now
+                task.save(update_fields=["status", "processed_at"])
 
             started = time.monotonic()
 
