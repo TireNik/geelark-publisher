@@ -47,11 +47,12 @@ class YoutubeRpaVerifyTests(SimpleTestCase):
         self.assertFalse(youtube_rpa_is_false_success(CLEAN_SUCCESS))
         self.assertEqual(classify_completed_rpa("YouTube", CLEAN_SUCCESS), "success")
 
-    def test_tiktok_not_classified_by_youtube_button(self):
-        self.assertEqual(
-            classify_completed_rpa("TikTok", PROD_FALSE_SUCCESS),
-            "success",
-        )
+    def test_tiktok_post_click_fail_is_false_success(self):
+        logs = [
+            "Click element: Selector: text：Post",
+            "Click failed, please check whether the element exists:",
+        ]
+        self.assertEqual(classify_completed_rpa("TikTok", logs), "false_success")
 
     def test_paste_click_fail_without_publish_button_is_ok(self):
         logs = [

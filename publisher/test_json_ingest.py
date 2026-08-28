@@ -124,6 +124,7 @@ class JsonIngestViewTests(SimpleTestCase):
 
 
 class YoutubeDescriptionTests(SimpleTestCase):
+    @override_settings(GEELARK_PUBLISH_MODE="stock", GEELARK_YOUTUBE_PUBLISH_MODE="stock")
     @patch('publisher.utils.requests.post')
     def test_add_youtube_task_sends_description(self, post):
         post.return_value.status_code = 200

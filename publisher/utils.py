@@ -568,7 +568,18 @@ def add_publish_task(env_id: str, resource_url: str, schedule_at: int, comment: 
 
 
 def add_tiktok_task(env_id: str, resource_url: str, schedule_at: int, description: str = None) -> str:
-    """Создание задачи для TikTok (через универсальный /task/add)"""
+    """Создание задачи для TikTok."""
+    from publisher.gallery_phone import gallery_publish_mode_enabled
+    from publisher.tiktok_gallery import add_tiktok_gallery_task
+
+    if gallery_publish_mode_enabled():
+        return add_tiktok_gallery_task(
+            env_id=env_id,
+            resource_url=resource_url,
+            schedule_at=schedule_at,
+            description=description,
+        )
+
     api_url = "https://openapi.geelark.com/open/v1/task/add"
     print(f'api url completed')
     trace_id = str(uuid.uuid4()).upper()
@@ -618,7 +629,18 @@ def add_tiktok_task(env_id: str, resource_url: str, schedule_at: int, descriptio
 
 
 def add_instagram_task(env_id: str, resource_url: str, schedule_at: int, description: str = None) -> str:
-    """Создание задачи для Instagram Reels"""
+    """Создание задачи для Instagram Reels."""
+    from publisher.gallery_phone import gallery_publish_mode_enabled
+    from publisher.instagram_gallery import add_instagram_gallery_task
+
+    if gallery_publish_mode_enabled():
+        return add_instagram_gallery_task(
+            env_id=env_id,
+            resource_url=resource_url,
+            schedule_at=schedule_at,
+            description=description,
+        )
+
     api_url = "https://openapi.geelark.com/open/v1/rpa/task/instagramPubReels"
     trace_id = str(uuid.uuid4()).upper()
     token = settings.GEELARK_TOKEN
@@ -672,10 +694,10 @@ def add_youtube_task(
     description: str = None,
 ) -> str:
     """Создание задачи для YouTube Video"""
-    from publisher.gallery_adb import youtube_gallery_mode_enabled
+    from publisher.gallery_phone import gallery_publish_mode_enabled
     from publisher.youtube_gallery import add_youtube_gallery_task
 
-    if youtube_gallery_mode_enabled():
+    if gallery_publish_mode_enabled():
         return add_youtube_gallery_task(
             env_id=env_id,
             resource_url=resource_url,

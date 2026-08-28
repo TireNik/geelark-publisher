@@ -15,7 +15,7 @@
 - `phone_guard` / watchdog: `sending`/`submitted` без `geelark_task_id` после `GEELARK_SENDING_ZOMBIE_SECONDS` (default 600) — зомби, не блокирует телефон; watchdog помечает `error`.
 - Ingest сохраняет `externalId` (`vf-entry-…`) для статусов в VF.
 
-YouTube ложный success и этап C (2026-08-28):
+Ложный success и gallery (2026-08-28):
 
-- `status=3` штатного `youtubePubShort` не равен «ролик выложен»: Click failed на Upload Short / Next / `shorts_camera_next_button` → publisher пишет `error` (код 20212), `stop_phone_if_idle`. Флаг `GEELARK_VERIFY_YOUTUBE_RPA` (default on).
-- `GEELARK_YOUTUBE_PUBLISH_MODE=gallery`: скачать mp4 на хост, `adb push` в `/sdcard/Download/vf_publish.mp4`, свой RPA (`errorType: stop`, без 2 мин idle). Не `phone/uploadFile`. Нужны `adb` в образе и ADB на профиле. Default `stock`.
+- `status=3` штатного шаблона не равен «ролик выложен»: Click failed на Next / Upload / Post / Share → publisher пишет `error` (код 20212), `stop_phone_if_idle`. Флаг `GEELARK_VERIFY_RPA` (default on), все сети.
+- Дефолт `GEELARK_PUBLISH_MODE=gallery`: `phone/start` → OpenAPI `phone/uploadFile` (OSS URL в Downloads) → свой RPA YouTube/TikTok/Instagram (`errorType: stop`). Один upload на (envId, resourceUrl). Без ADB и без пакета `android-tools-adb`. Аварийный откат: `GEELARK_PUBLISH_MODE=stock`.

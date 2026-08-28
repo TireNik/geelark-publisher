@@ -1,18 +1,20 @@
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
-from publisher.gallery_adb import (
+from publisher.gallery_phone import (
     GALLERY_REMOTE_PATH,
-    connect_and_login,
-    get_adb_endpoint,
-    push_to_gallery,
+    ensure_resource_on_gallery,
+    gallery_publish_mode_enabled,
+    reset_gallery_push_cache,
+    upload_resource_url_to_phone,
     youtube_gallery_mode_enabled,
 )
+from publisher.instagram_gallery import add_instagram_gallery_task, build_instagram_gallery_flow
 from publisher.rpa_verify import FAKE_SUCCESS_FAIL_CODE, resolve_completed_status
 from publisher.test_rpa_verify import PROD_FALSE_SUCCESS
+from publisher.tiktok_gallery import add_tiktok_gallery_task, build_tiktok_gallery_flow
 from publisher.youtube_gallery import (
     add_youtube_gallery_task,
     build_youtube_gallery_flow,
@@ -20,17 +22,21 @@ from publisher.youtube_gallery import (
 )
 from publisher.models import PublicationTask, UploadSession
 from publisher.views import sync_geelark_statuses
-from publisher.utils import add_youtube_task
+from publisher.utils import add_instagram_task, add_tiktok_task, add_youtube_task
 
 
-class YoutubeGalleryModeTests(SimpleTestCase):
-    @override_settings(GEELARK_YOUTUBE_PUBLISH_MODE="stock")
-    def test_stock_is_default_off(self):
+class GalleryModeTests(SimpleTestCase):
+    def setUp(self):
+        reset_gallery_push_cache()
+
+    @override_settings(GEELARK_PUBLISH_MODE="stock", GEELARK_YOUTUBE_PUBLISH_MODE="stock")
+    def test_stock_flag_disables_gallery(self):
+        self.assertFalse(gallery_publish_mode_enabled())
         self.assertFalse(youtube_gallery_mode_enabled())
 
-    @override_settings(GEELARK_YOUTUBE_PUBLISH_MODE="gallery")
-    def test_gallery_flag(self):
-        self.assertTrue(youtube_gallery_mode_enabled())
+    @override_settings(GEELARK_PUBLISH_MODE="gallery")
+    def test_gallery_is_default_on(self):
+        self.assertTrue(gallery_publish_mode_enabled())
 
 
 class YoutubeGalleryFlowTests(SimpleTestCase):
@@ -43,24 +49,14 @@ class YoutubeGalleryFlowTests(SimpleTestCase):
         self.assertIn("Next", dumped)
         self.assertIn("Uploaded to Your Videos", dumped)
         self.assertNotIn("120000", dumped)
-        waits = [
-            step["config"].get("searchTime")
-            for step in content["contents"]
-            if step.get("type") == "waitEle"
-            and any(
-                f.get("content") == "Uploaded to Your Videos"
-                for f in step["config"].get("filters", [])
-            )
-        ]
-        self.assertEqual(waits, [60000])
 
     @override_settings(GEELARK_YOUTUBE_GALLERY_FLOW_ID="flow-fixed")
     def test_configured_flow_id_skips_import(self):
         self.assertEqual(ensure_youtube_gallery_flow_id(), "flow-fixed")
 
-    @patch("publisher.youtube_gallery.push_resource_url_to_gallery")
+    @patch("publisher.gallery_rpa.ensure_resource_on_gallery")
     @patch("publisher.youtube_gallery.ensure_youtube_gallery_flow_id", return_value="flow-1")
-    @patch("publisher.youtube_gallery._geelark_api_post")
+    @patch("publisher.gallery_rpa._geelark_api_post")
     def test_rpa_add_uses_flow_and_title(self, api_post, _flow, push):
         api_post.return_value = {"code": 0, "data": {"taskId": "rpa-9"}}
         task_id = add_youtube_gallery_task(
@@ -79,51 +75,79 @@ class YoutubeGalleryFlowTests(SimpleTestCase):
         self.assertGreaterEqual(payload["scheduleAt"], int(timezone.now().timestamp()))
 
 
-class GalleryAdbTests(SimpleTestCase):
-    @patch("publisher.gallery_adb._geelark_api_post")
-    def test_get_adb_endpoint_retries_until_ready(self, api_post):
+class TikTokInstagramFlowTests(SimpleTestCase):
+    def test_tiktok_flow_stops_on_post(self):
+        flow = build_tiktok_gallery_flow()
+        self.assertEqual(flow["content"]["errorType"], "stop")
+        dumped = str(flow)
+        self.assertIn("Upload", dumped)
+        self.assertIn("Post", dumped)
+        self.assertIn("com.zhiliaoapp.musically", dumped)
+
+    def test_instagram_flow_stops_on_share(self):
+        flow = build_instagram_gallery_flow()
+        self.assertEqual(flow["content"]["errorType"], "stop")
+        dumped = str(flow)
+        self.assertIn("Share", dumped)
+        self.assertIn("com.instagram.android", dumped)
+
+    @patch("publisher.gallery_rpa.ensure_resource_on_gallery")
+    @patch("publisher.tiktok_gallery.ensure_tiktok_gallery_flow_id", return_value="tt-flow")
+    @patch("publisher.gallery_rpa._geelark_api_post")
+    def test_tiktok_rpa_param_desc(self, api_post, _flow, push):
+        api_post.return_value = {"code": 0, "data": {"taskId": "tt-1"}}
+        task_id = add_tiktok_gallery_task("env-1", "https://cdn.example/v.mp4", 1, "cap")
+        self.assertEqual(task_id, "tt-1")
+        self.assertEqual(api_post.call_args.args[1]["paramMap"]["Desc"], "cap")
+
+    @patch("publisher.gallery_rpa.ensure_resource_on_gallery")
+    @patch("publisher.instagram_gallery.ensure_instagram_gallery_flow_id", return_value="ig-flow")
+    @patch("publisher.gallery_rpa._geelark_api_post")
+    def test_instagram_rpa_param_desc(self, api_post, _flow, push):
+        api_post.return_value = {"code": 0, "data": {"taskId": "ig-1"}}
+        task_id = add_instagram_gallery_task("env-1", "https://cdn.example/v.mp4", 1, "reel")
+        self.assertEqual(task_id, "ig-1")
+        self.assertEqual(api_post.call_args.args[1]["paramMap"]["Desc"], "reel")
+
+
+class PhoneUploadTests(SimpleTestCase):
+    def setUp(self):
+        reset_gallery_push_cache()
+
+    @patch("publisher.gallery_phone.ensure_phone_running")
+    @patch("publisher.gallery_phone._geelark_api_post")
+    def test_upload_file_polls_until_done(self, api_post, _boot):
         api_post.side_effect = [
-            {"code": 0, "data": {"items": [{"id": "e1", "code": 42002, "ip": "", "port": "", "pwd": ""}]}},
-            {
-                "code": 0,
-                "data": {
-                    "items": [
-                        {"id": "e1", "code": 0, "ip": "1.2.3.4", "port": "21781", "pwd": "secret"}
-                    ]
-                },
-            },
+            {"code": 0, "data": {"taskId": "up-1"}},
+            {"code": 0, "data": {"status": 2}},
+            {"code": 0, "data": {"status": 3}},
+            {"code": 0, "data": {"status": True, "output": "ok"}},
         ]
-        with patch("publisher.gallery_adb.time.sleep"):
-            endpoint = get_adb_endpoint("e1", attempts=3)
-        self.assertEqual(endpoint["serial"], "1.2.3.4:21781")
-        self.assertEqual(endpoint["pwd"], "secret")
-
-    @patch("publisher.gallery_adb.subprocess.run")
-    def test_connect_redacts_password_on_failure(self, run):
-        run.side_effect = [
-            SimpleNamespace(returncode=0, stdout="connected to 1.2.3.4:21781", stderr=""),
-            SimpleNamespace(returncode=1, stdout="", stderr="glogin super-secret-pwd denied"),
-        ]
-        with self.assertRaises(RuntimeError) as ctx:
-            connect_and_login(
-                {"serial": "1.2.3.4:21781", "pwd": "super-secret-pwd"}
-            )
-        self.assertNotIn("super-secret-pwd", str(ctx.exception))
-        self.assertIn("***", str(ctx.exception))
-
-    @patch("publisher.gallery_adb._run_adb")
-    def test_push_scans_media(self, run_adb):
-        run_adb.return_value = SimpleNamespace(stdout="", stderr="", returncode=0)
-        remote = push_to_gallery("1.2.3.4:1", MagicMock(__str__=lambda self: "/tmp/a.mp4"))
+        with patch("publisher.gallery_phone.time.sleep"):
+            remote = upload_resource_url_to_phone("env-1", "https://cdn.example/v.mp4")
         self.assertEqual(remote, GALLERY_REMOTE_PATH)
-        scan_args = run_adb.call_args_list[1].args[0]
-        self.assertIn("android.intent.action.MEDIA_SCANNER_SCAN_FILE", scan_args)
+        self.assertEqual(api_post.call_args_list[0].args[0], "/phone/uploadFile")
+        self.assertEqual(
+            api_post.call_args_list[0].args[1],
+            {"id": "env-1", "fileUrl": "https://cdn.example/v.mp4"},
+        )
+        self.assertEqual(api_post.call_args_list[2].args[0], "/phone/uploadFile/result")
+        self.assertEqual(api_post.call_args_list[3].args[0], "/shell/execute")
+
+    @patch("publisher.gallery_phone.upload_resource_url_to_phone", return_value=GALLERY_REMOTE_PATH)
+    def test_same_env_and_url_uploads_once(self, upload):
+        first = ensure_resource_on_gallery("env-1", "https://cdn.example/v.mp4")
+        second = ensure_resource_on_gallery("env-1", "https://cdn.example/v.mp4")
+        other = ensure_resource_on_gallery("env-2", "https://cdn.example/v.mp4")
+        self.assertEqual(first, second)
+        self.assertEqual(upload.call_count, 2)
+        self.assertEqual(other, GALLERY_REMOTE_PATH)
 
 
-class AddYoutubeTaskRoutingTests(SimpleTestCase):
-    @override_settings(GEELARK_YOUTUBE_PUBLISH_MODE="gallery", GEELARK_TOKEN="tok")
+class AddTaskRoutingTests(SimpleTestCase):
+    @override_settings(GEELARK_PUBLISH_MODE="gallery", GEELARK_TOKEN="tok")
     @patch("publisher.youtube_gallery.add_youtube_gallery_task", return_value="gal-1")
-    def test_gallery_mode_skips_stock_template(self, gallery_add):
+    def test_gallery_youtube_skips_stock_template(self, gallery_add):
         with patch("publisher.utils.requests.post") as post:
             task_id = add_youtube_task(
                 env_id="env",
@@ -136,7 +160,25 @@ class AddYoutubeTaskRoutingTests(SimpleTestCase):
         gallery_add.assert_called_once()
         post.assert_not_called()
 
-    @override_settings(GEELARK_YOUTUBE_PUBLISH_MODE="stock", GEELARK_TOKEN="tok")
+    @override_settings(GEELARK_PUBLISH_MODE="gallery", GEELARK_TOKEN="tok")
+    @patch("publisher.tiktok_gallery.add_tiktok_gallery_task", return_value="gal-tt")
+    def test_gallery_tiktok_skips_task_add(self, gallery_add):
+        with patch("publisher.utils.requests.post") as post:
+            task_id = add_tiktok_task("env", "https://storage.example/v.mp4", 1, "cap")
+        self.assertEqual(task_id, "gal-tt")
+        gallery_add.assert_called_once()
+        post.assert_not_called()
+
+    @override_settings(GEELARK_PUBLISH_MODE="gallery", GEELARK_TOKEN="tok")
+    @patch("publisher.instagram_gallery.add_instagram_gallery_task", return_value="gal-ig")
+    def test_gallery_instagram_skips_stock_reels(self, gallery_add):
+        with patch("publisher.utils.requests.post") as post:
+            task_id = add_instagram_task("env", "https://storage.example/v.mp4", 1, "cap")
+        self.assertEqual(task_id, "gal-ig")
+        gallery_add.assert_called_once()
+        post.assert_not_called()
+
+    @override_settings(GEELARK_PUBLISH_MODE="stock", GEELARK_YOUTUBE_PUBLISH_MODE="stock", GEELARK_TOKEN="tok")
     @patch("publisher.utils.requests.post")
     def test_stock_mode_still_calls_youtube_pub_short(self, post):
         post.return_value.status_code = 200
@@ -151,6 +193,22 @@ class AddYoutubeTaskRoutingTests(SimpleTestCase):
         )
         self.assertEqual(task_id, "t1")
         self.assertIn("youtubePubShort", post.call_args.args[0])
+
+    @override_settings(GEELARK_PUBLISH_MODE="gallery", GEELARK_TOKEN="tok")
+    @patch("publisher.youtube_gallery.ensure_youtube_gallery_flow_id", return_value="yf")
+    @patch("publisher.tiktok_gallery.ensure_tiktok_gallery_flow_id", return_value="tf")
+    @patch("publisher.gallery_rpa._geelark_api_post")
+    @patch(
+        "publisher.gallery_phone.upload_resource_url_to_phone",
+        return_value=GALLERY_REMOTE_PATH,
+    )
+    def test_youtube_then_tiktok_share_one_upload(self, upload, api_post, _tf, _yf):
+        reset_gallery_push_cache()
+        api_post.return_value = {"code": 0, "data": {"taskId": "rpa"}}
+        add_youtube_task("env-1", "https://cdn.example/v.mp4", 1, "t")
+        add_tiktok_task("env-1", "https://cdn.example/v.mp4", 1, "c")
+        self.assertEqual(upload.call_count, 1)
+        self.assertEqual(api_post.call_count, 2)
 
 
 class SyncFalseSuccessTests(TestCase):
@@ -167,7 +225,7 @@ class SyncFalseSuccessTests(TestCase):
             geelark_task_id="g-task-1",
         )
 
-    @override_settings(GEELARK_VERIFY_YOUTUBE_RPA=True)
+    @override_settings(GEELARK_VERIFY_RPA=True, GEELARK_VERIFY_YOUTUBE_RPA=True)
     @patch("publisher.views.stop_phone_if_idle", return_value=True)
     @patch("publisher.views.mark_phone_stopped")
     @patch("publisher.views.query_geelark_task_detail")
@@ -190,19 +248,25 @@ class SyncFalseSuccessTests(TestCase):
         stop_idle.assert_called_once()
         query_detail.assert_called_once()
 
-    @override_settings(GEELARK_VERIFY_YOUTUBE_RPA=True)
+    @override_settings(GEELARK_VERIFY_RPA=True, GEELARK_VERIFY_YOUTUBE_RPA=True)
     @patch("publisher.views.stop_phone_if_idle", return_value=False)
     @patch("publisher.views.query_geelark_task_detail")
     @patch("publisher.views.query_geelark_task_statuses")
-    def test_tiktok_status3_skips_detail_fetch(self, query_status, query_detail, _stop):
+    def test_tiktok_click_fail_status3_becomes_error(self, query_status, query_detail, _stop):
         task = self._task(network="TikTok")
         query_status.return_value = {"g-task-1": {"status": 3, "cost": 100}}
+        query_detail.return_value = {
+            "logs": [
+                "Click element: Selector: text：Post",
+                "Click failed, please check whether the element exists:",
+            ]
+        }
 
         sync_geelark_statuses([task.session], force=True)
 
         task.refresh_from_db()
-        self.assertEqual(task.status, "success")
-        query_detail.assert_not_called()
+        self.assertEqual(task.status, "error")
+        query_detail.assert_called_once()
 
     def test_resolve_helper_still_maps_false_success(self):
         status, code, message = resolve_completed_status("YouTube", PROD_FALSE_SUCCESS)

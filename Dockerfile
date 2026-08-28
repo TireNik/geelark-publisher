@@ -1,5 +1,7 @@
 # publisher/Dockerfile
-FROM python:3.10-slim
+# Pin bookworm: floating python:3.10-slim moved to trixie; 77.222 often cannot
+# reach deb.debian.org for a cold apt on the new base.
+FROM python:3.10-slim-bookworm
 
 # Отключаем запись байт-кода и буферизацию логов
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -8,12 +10,12 @@ ENV PYTHONUNBUFFERED=1
 # Устанавливаем рабочую директорию
 WORKDIR /app
 
-# Устанавливаем системные зависимости (нужно для некоторых пакетов)
+# Устанавливаем системные зависимости (нужно для некоторых пакетов).
+# ADB в образ не кладём: публикация идёт через OpenAPI phone/uploadFile.
 RUN apt-get update && apt-get install -y \
     gcc \
     libffi-dev \
     libssl-dev \
-    android-tools-adb \
     && rm -rf /var/lib/apt/lists/*
 
 # Копируем зависимости и устанавливаем

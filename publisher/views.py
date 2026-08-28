@@ -313,12 +313,10 @@ def sync_geelark_statuses(sessions, force=False):
                 update_fields.extend(['status', 'error_message'])
             elif external_status == 3:
                 logs = []
-                network = (task.social_network or '').lower()
-                verify_youtube = (
-                    network == 'youtube'
-                    and getattr(settings, 'GEELARK_VERIFY_YOUTUBE_RPA', True)
-                )
-                if verify_youtube:
+                verify_rpa = getattr(settings, 'GEELARK_VERIFY_RPA', None)
+                if verify_rpa is None:
+                    verify_rpa = getattr(settings, 'GEELARK_VERIFY_YOUTUBE_RPA', True)
+                if verify_rpa:
                     try:
                         detail = query_geelark_task_detail(task.geelark_task_id)
                         logs = detail.get('logs') or []
