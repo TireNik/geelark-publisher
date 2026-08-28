@@ -672,6 +672,17 @@ def add_youtube_task(
     description: str = None,
 ) -> str:
     """Создание задачи для YouTube Video"""
+    from publisher.gallery_adb import youtube_gallery_mode_enabled
+    from publisher.youtube_gallery import add_youtube_gallery_task
+
+    if youtube_gallery_mode_enabled():
+        return add_youtube_gallery_task(
+            env_id=env_id,
+            resource_url=resource_url,
+            schedule_at=schedule_at,
+            title=title,
+        )
+
     api_url = "https://openapi.geelark.com/open/v1/rpa/task/youtubePubShort"
     trace_id = str(uuid.uuid4()).upper()
     token = settings.GEELARK_TOKEN

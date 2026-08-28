@@ -1,3 +1,4 @@
+import logging
 import threading
 from datetime import datetime, timedelta
 
@@ -6,6 +7,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.contrib import messages
 from django.utils import timezone
+from django.conf import settings
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -19,12 +21,16 @@ from .utils import (
     parse_publish_time,
     convert_social_networks,
     query_geelark_task_statuses,
+    query_geelark_task_detail,
     split_profile_reference,
 )
 from .cost_guard import apply_fail_side_effects
 from .phone_guard import mark_phone_stopped, stop_phone_if_idle
+from .rpa_verify import resolve_completed_status
 from .serializers import UploadSessionSerializer, PublicationTaskSerializer
 from .json_ingest import JsonIngestView, JsonIngestTestView  # noqa: F401  — urls.py
+
+logger = logging.getLogger(__name__)
 
 
 # HTML СТРАНИЦЫ (только шаблоны)
@@ -306,12 +312,41 @@ def sync_geelark_statuses(sessions, force=False):
                     update_fields.append('geelark_started_at')
                 update_fields.extend(['status', 'error_message'])
             elif external_status == 3:
-                task.status = 'success'
-                task.error_message = ''
-                task.geelark_fail_code = None
+                logs = []
+                network = (task.social_network or '').lower()
+                verify_youtube = (
+                    network == 'youtube'
+                    and getattr(settings, 'GEELARK_VERIFY_YOUTUBE_RPA', True)
+                )
+                if verify_youtube:
+                    try:
+                        detail = query_geelark_task_detail(task.geelark_task_id)
+                        logs = detail.get('logs') or []
+                    except Exception as exc:
+                        logger.warning(
+                            'GeeLark task/detail failed for %s: %s',
+                            task.geelark_task_id,
+                            exc,
+                        )
+                local_status, fail_code, error_message = resolve_completed_status(
+                    task.social_network, logs
+                )
+                task.status = local_status
+                task.error_message = error_message
+                task.geelark_fail_code = fail_code
                 task.processed_at = checked_at
                 became_terminal = True
-                update_fields.extend(['status', 'error_message', 'geelark_fail_code', 'processed_at'])
+                update_fields.extend(
+                    ['status', 'error_message', 'geelark_fail_code', 'processed_at']
+                )
+                if local_status == 'error':
+                    fail_note = apply_fail_side_effects(
+                        task, checked_at, proxy_rotation_results
+                    )
+                    if fail_note:
+                        task.error_message = f"{task.error_message}. {fail_note}"
+                    if getattr(task, 'phone_stopped_at', None) and 'phone_stopped_at' not in update_fields:
+                        update_fields.append('phone_stopped_at')
             elif external_status in (4, 7):
                 task.status = 'error'
                 task.geelark_fail_code = external.get('failCode')

@@ -123,3 +123,13 @@ GEELARK_TASK_SLA_SEC = int(os.environ.get('GEELARK_TASK_SLA_SEC', '900'))
 GEELARK_DISPATCH_LEAD_SECONDS = int(os.environ.get('GEELARK_DISPATCH_LEAD_SECONDS', '120'))
 # sending без geelark_task_id дольше этого → зомби (не блокирует телефон)
 GEELARK_SENDING_ZOMBIE_SECONDS = int(os.environ.get('GEELARK_SENDING_ZOMBIE_SECONDS', '600'))
+
+# YouTube: stock = youtubePubShort (скачивает resourceUrl на телефон).
+# gallery = ADB push в галерею + свой RPA (errorType=stop на Next/Upload Short).
+GEELARK_YOUTUBE_PUBLISH_MODE = os.environ.get('GEELARK_YOUTUBE_PUBLISH_MODE', 'stock')
+GEELARK_YOUTUBE_GALLERY_FLOW_ID = os.environ.get('GEELARK_YOUTUBE_GALLERY_FLOW_ID', '').strip()
+GEELARK_ADB_BIN = os.environ.get('GEELARK_ADB_BIN', 'adb')
+GEELARK_ADB_BOOT_WAIT_SEC = int(os.environ.get('GEELARK_ADB_BOOT_WAIT_SEC', '45'))
+GEELARK_VERIFY_YOUTUBE_RPA = os.environ.get('GEELARK_VERIFY_YOUTUBE_RPA', '1').lower() in {
+    '1', 'true', 'yes', 'on',
+}
