@@ -18,4 +18,4 @@
 Ложный success и gallery (2026-08-28):
 
 - `status=3` штатного шаблона не равен «ролик выложен»: Click failed на Next / Upload / Post / Share → publisher пишет `error` (код 20212), `stop_phone_if_idle`. Флаг `GEELARK_VERIFY_RPA` (default on), все сети.
-- Дефолт `GEELARK_PUBLISH_MODE=gallery`: `phone/start` → OpenAPI `phone/uploadFile` (OSS URL в Downloads) → свой RPA YouTube/TikTok/Instagram (`errorType: stop`). Один upload на (envId, resourceUrl). Без ADB и без пакета `android-tools-adb`. Аварийный откат: `GEELARK_PUBLISH_MODE=stock`.
+- Дефолт `GEELARK_PUBLISH_MODE=stock`: штатные `youtubePubShort` / TikTok `task/add` (рабочий путь 24.08). Ложный success: Click failed **или** No element found на Next/Upload/Post → `error` 20212, телефон гасим (`GEELARK_VERIFY_RPA`). Gallery (`phone/uploadFile` + свой RPA) — opt-in. Таймаут 8 мин и `phone_guard` без изменений.

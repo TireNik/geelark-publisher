@@ -34,8 +34,13 @@ class GalleryModeTests(SimpleTestCase):
         self.assertFalse(gallery_publish_mode_enabled())
         self.assertFalse(youtube_gallery_mode_enabled())
 
+    def test_stock_is_settings_default(self):
+        from django.conf import settings as dj
+        self.assertEqual(str(dj.GEELARK_PUBLISH_MODE).strip().lower(), "stock")
+        self.assertFalse(gallery_publish_mode_enabled())
+
     @override_settings(GEELARK_PUBLISH_MODE="gallery")
-    def test_gallery_is_default_on(self):
+    def test_gallery_opt_in(self):
         self.assertTrue(gallery_publish_mode_enabled())
 
 

@@ -27,6 +27,14 @@ CLEAN_SUCCESS = [
     "[2026-08-24 15:03:49 263] Close app: Package name: com.google.android.youtube",
 ]
 
+PROD_NO_ELEMENT_FALSE_SUCCESS = [
+    "[2026-08-28 09:51:07 730] Click element: Selector: text：Next  Waiting time: 20000",
+    "[2026-08-28 09:51:27 805] No element found. Check whether the element properties are filled in properly or whether the current page contains an element:",
+    "[2026-08-28 09:52:43 104] Click element: Selector: text：Upload Short  Waiting time: 15000",
+    "[2026-08-28 09:52:58 153] No element found. Check whether the element properties are filled in properly or whether the current page contains an element:",
+    "[2026-08-28 09:54:15 610] Run successfully:",
+]
+
 
 class YoutubeRpaVerifyTests(SimpleTestCase):
     def test_prod_click_failed_upload_short_is_false_success(self):
@@ -46,6 +54,13 @@ class YoutubeRpaVerifyTests(SimpleTestCase):
     def test_clean_youtube_logs_are_success(self):
         self.assertFalse(youtube_rpa_is_false_success(CLEAN_SUCCESS))
         self.assertEqual(classify_completed_rpa("YouTube", CLEAN_SUCCESS), "success")
+
+    def test_no_element_found_on_upload_is_false_success(self):
+        self.assertTrue(youtube_rpa_is_false_success(PROD_NO_ELEMENT_FALSE_SUCCESS))
+        self.assertEqual(
+            classify_completed_rpa("YouTube", PROD_NO_ELEMENT_FALSE_SUCCESS),
+            "false_success",
+        )
 
     def test_tiktok_post_click_fail_is_false_success(self):
         logs = [

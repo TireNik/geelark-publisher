@@ -24,13 +24,13 @@ _pushed: dict[tuple[str, str], str] = {}
 
 
 def gallery_publish_mode_enabled() -> bool:
-    """Gallery is the default. Stock templates only if GEELARK_PUBLISH_MODE=stock."""
+    """Opt-in. Default is stock youtubePubShort / task/add (working path of 24.08)."""
     raw = (
         getattr(settings, "GEELARK_PUBLISH_MODE", None)
         or getattr(settings, "GEELARK_YOUTUBE_PUBLISH_MODE", None)
-        or "gallery"
+        or "stock"
     )
-    return str(raw).strip().lower() != "stock"
+    return str(raw).strip().lower() == "gallery"
 
 
 def youtube_gallery_mode_enabled() -> bool:
