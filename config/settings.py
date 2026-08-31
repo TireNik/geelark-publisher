@@ -116,7 +116,7 @@ VF_SHARELINK_TOKEN = os.environ.get('VF_SHARELINK_TOKEN', '').strip()
 VF_INGEST_TOKEN = os.environ.get('VF_INGEST_TOKEN', '').strip()
 
 # Параллельный prepare/publish и защита от зависаний (см. docs/upload-cost-optimization.md)
-GEELARK_MAX_PARALLEL = int(os.environ.get('GEELARK_MAX_PARALLEL', '3'))
+GEELARK_MAX_PARALLEL = int(os.environ.get('GEELARK_MAX_PARALLEL', '2'))
 GEELARK_UPLOAD_TIMEOUT_SEC = int(os.environ.get('GEELARK_UPLOAD_TIMEOUT_SEC', '180'))
 GEELARK_DOWNLOAD_TIMEOUT_SEC = int(os.environ.get('GEELARK_DOWNLOAD_TIMEOUT_SEC', '180'))
 GEELARK_TASK_SLA_SEC = int(os.environ.get('GEELARK_TASK_SLA_SEC', '900'))

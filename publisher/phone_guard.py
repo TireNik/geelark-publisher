@@ -19,6 +19,11 @@ def dispatch_lead_seconds() -> int:
     return max(0, int(getattr(settings, 'GEELARK_DISPATCH_LEAD_SECONDS', 120)))
 
 
+def max_parallel_jobs() -> int:
+    """Cap simultaneous GeeLark phones / OSS prepares (default 2)."""
+    return max(1, int(getattr(settings, 'GEELARK_MAX_PARALLEL', 2)))
+
+
 def sending_zombie_seconds() -> int:
     """Grace for status=sending before create_geelark_publish_task returns."""
     return max(60, int(getattr(settings, 'GEELARK_SENDING_ZOMBIE_SECONDS', 600)))
@@ -87,6 +92,15 @@ def profile_has_running_rpa(profile_id, exclude_id=None, now=None) -> bool:
     if exclude_id is not None:
         query = query.exclude(id=exclude_id)
     return query.exists()
+
+
+def running_rpa_count(exclude_id=None, now=None) -> int:
+    """How many GeeLark phones are actually in flight (all profiles)."""
+    now = now or timezone.now()
+    query = PublicationTask.objects.filter(_live_running_rpa_q(now))
+    if exclude_id is not None:
+        query = query.exclude(id=exclude_id)
+    return query.count()
 
 
 def profile_has_active_task(profile_id, exclude_id=None, now=None) -> bool:

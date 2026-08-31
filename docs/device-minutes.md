@@ -11,7 +11,7 @@
 - Watchdog синкает только живые задачи; success без ссылки 6 часов не крутим.
 - `geelark_rpa_cost_sec` из `task/query.cost`.
 - GeeLark `shareLink` из контура убран: не резолвим, не отдаём в API, не POST в VF. Статистика — harvest `#vf_` / ig-stats.
-- `geelark_dispatch`: один RPA на `profile_id` (вторая сеть ждёт `prepared`).
+- `geelark_dispatch`: один RPA на `profile_id` (вторая сеть ждёт `prepared`) **и** глобальный лимит `GEELARK_MAX_PARALLEL` (default 2) на все телефоны сразу — иначе массовая пачка жжёт PAYG-прокси (29996, session 308).
 - `phone_guard` / watchdog: `sending`/`submitted` без `geelark_task_id` после `GEELARK_SENDING_ZOMBIE_SECONDS` (default 600) — зомби, не блокирует телефон; watchdog помечает `error`.
 - Ingest сохраняет `externalId` (`vf-entry-…`) для статусов в VF.
 

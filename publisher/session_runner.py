@@ -10,8 +10,10 @@
 1) prepare — download + PUT storage (без телефона), локальный файл сразу удаляем;
    один URL → один resourceUrl (дедуп для YT+TT+IG). Excel и VF ingest
    вызывают этот же worker.
-2) publish — только create RPA task (параллельно до GEELARK_MAX_PARALLEL).
+2) publish — пометить prepared (OSS prepare параллельно до GEELARK_MAX_PARALLEL).
    Телефон на одном envId не гасим, пока другая сеть этой сессии ещё due.
+   Старт телефонов — geelark_dispatch, тоже не больше GEELARK_MAX_PARALLEL
+   (остальные prepared ждут watchdog).
 """
 from __future__ import annotations
 
@@ -29,6 +31,7 @@ from django.utils import timezone
 
 from . import utils as u
 from .models import PublicationTask, UploadSession, refresh_session_status
+from .phone_guard import max_parallel_jobs
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +170,7 @@ def session_worker(session_id: int) -> None:
         print(f"Сессия {session_id}: нет pending задач")
         return
 
-    max_parallel = max(1, min(3, _cfg_int("GEELARK_MAX_PARALLEL", 3)))
+    max_parallel = max_parallel_jobs()
     sla_sec = _cfg_int("GEELARK_TASK_SLA_SEC", 900)
 
     url_to_tasks: Dict[str, List[PublicationTask]] = tasks_by_video_url(tasks)

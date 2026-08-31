@@ -6,6 +6,7 @@ from django.test import SimpleTestCase, override_settings
 
 from publisher.phone_guard import (
     is_zombie_running_task,
+    max_parallel_jobs,
     profile_has_running_rpa,
     reap_zombie_running_tasks,
     sibling_keeps_phone,
@@ -84,6 +85,20 @@ class StopPhoneIfIdleTests(SimpleTestCase):
     def test_stops_when_profile_is_idle(self, _has, _status, stop):
         self.assertTrue(stop_phone_if_idle('env-1', exclude_task_id=10))
         stop.assert_called_once_with('env-1')
+
+
+class MaxParallelJobsTests(SimpleTestCase):
+    @override_settings(GEELARK_MAX_PARALLEL=2)
+    def test_default_cap_is_two(self):
+        self.assertEqual(max_parallel_jobs(), 2)
+
+    @override_settings(GEELARK_MAX_PARALLEL=0)
+    def test_zero_becomes_one(self):
+        self.assertEqual(max_parallel_jobs(), 1)
+
+    @override_settings(GEELARK_MAX_PARALLEL=8)
+    def test_no_hardcoded_three_clamp(self):
+        self.assertEqual(max_parallel_jobs(), 8)
 
 
 class ProfileHasRunningRpaTests(SimpleTestCase):

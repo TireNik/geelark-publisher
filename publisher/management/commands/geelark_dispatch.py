@@ -9,7 +9,7 @@ from django.utils import timezone
 from publisher import utils as u
 from publisher.cost_guard import skip_dispatch_reason
 from publisher.models import PublicationTask, refresh_session_status
-from publisher.phone_guard import profile_has_running_rpa
+from publisher.phone_guard import profile_has_running_rpa, running_rpa_count, max_parallel_jobs
 
 
 class Command(BaseCommand):
@@ -33,6 +33,7 @@ class Command(BaseCommand):
         submitted = 0
         failed = 0
         deferred = 0
+        cap = max_parallel_jobs()
 
         for task_id in task_ids:
             with transaction.atomic():
@@ -65,6 +66,15 @@ class Command(BaseCommand):
                     deferred += 1
                     self.stdout.write(
                         f"Задача {task.id}: ждём, на телефоне {task.profile_id} уже идёт RPA."
+                    )
+                    continue
+
+                in_flight = running_rpa_count(exclude_id=task.id)
+                if in_flight >= cap:
+                    deferred += 1
+                    self.stdout.write(
+                        f"Задача {task.id}: очередь, уже {in_flight} публикаций "
+                        f"(лимит {cap})."
                     )
                     continue
 

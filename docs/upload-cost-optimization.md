@@ -19,7 +19,8 @@
 
 | Изменение | Зачем |
 |-----------|--------|
-| `session_runner`: prepare → publish | параллель 2–3; телефон не нужен на download/PUT |
+| `session_runner`: prepare → publish | параллель OSS = `GEELARK_MAX_PARALLEL` (default 2); телефон не нужен на download/PUT |
+| `geelark_dispatch`: глобальный cap | одновременно не больше 2 телефонов/прокси; остальные `prepared` ждут watchdog |
 | Дедуп storage по `video_url` | один PUT на YT+TT одного файла |
 | Удаление temp сразу после PUT | меньше диска / orphan |
 | Timeout на PUT | против «висит upload» |
@@ -31,8 +32,9 @@
 ## Поток
 
 ```text
-prepare (parallel): download → PUT storage → wait resource → delete local mp4
-publish (parallel): create RPA task → status=submitted
+prepare (parallel ≤ GEELARK_MAX_PARALLEL): download → PUT storage → delete local mp4
+publish: status=prepared (телефон ещё не стартует)
+dispatch (≤ GEELARK_MAX_PARALLEL in-flight RPA): create RPA → submitted; остальные очередь
 watchdog/sync: processing → success|error; сразу гасим телефон (если нет соседней due-сети) + idle reaper
 29996: abort хвоста телефона → stop phone → одна смена порта; ≥3 в сессии → abort остальных
 20116: не стартуем остальные сети на этом телефоне
