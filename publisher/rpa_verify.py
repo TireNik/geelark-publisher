@@ -17,6 +17,8 @@ _PUBLISH_MARKERS = (
     "text:next",
     "create a short",
     "gallery",
+    "галерея",
+    "загрузить",
     "publish",
     "post",
     "share",

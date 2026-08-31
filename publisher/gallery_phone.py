@@ -24,11 +24,11 @@ _pushed: dict[tuple[str, str], str] = {}
 
 
 def gallery_publish_mode_enabled() -> bool:
-    """Opt-in. Default is stock youtubePubShort / task/add (working path of 24.08)."""
+    """Default is gallery: phone/uploadFile + custom RPA. stock = youtubePubShort."""
     raw = (
         getattr(settings, "GEELARK_PUBLISH_MODE", None)
         or getattr(settings, "GEELARK_YOUTUBE_PUBLISH_MODE", None)
-        or "stock"
+        or "gallery"
     )
     return str(raw).strip().lower() == "gallery"
 
@@ -51,7 +51,14 @@ def _upload_wait_sec() -> int:
 
 
 def ensure_phone_running(env_id: str) -> None:
-    """Start the cloud phone if needed and wait until status=Started."""
+    """Start the cloud phone if needed and wait until status=Started.
+
+    status 1 (Starting) is not a failure — wait it out. Session 294 TikTok
+    died because start() raced a boot already in progress, then we raised
+    before the wait loop.
+    """
+    env_id = str(env_id)
+    info = None
     try:
         info = check_phone_status(env_id)
         if info.get("is_running"):
@@ -59,15 +66,17 @@ def ensure_phone_running(env_id: str) -> None:
     except Exception:
         logger.info("Phone status unknown for %s, trying start", env_id)
 
-    try:
-        start_cloud_phone(str(env_id))
-    except Exception as exc:
+    already_starting = bool(info) and info.get("status") == 1
+    if not already_starting:
         try:
-            if check_phone_status(env_id).get("is_running"):
-                return
-        except Exception:
-            pass
-        raise RuntimeError(f"phone start failed: {exc}") from exc
+            start_cloud_phone(env_id)
+        except Exception as exc:
+            try:
+                info = check_phone_status(env_id)
+            except Exception:
+                info = None
+            if not (info and (info.get("is_running") or info.get("status") == 1)):
+                raise RuntimeError(f"phone start failed: {exc}") from exc
 
     deadline = time.time() + _boot_wait_sec()
     while time.time() < deadline:

@@ -1,4 +1,4 @@
-"""Shared custom RPA helpers: English UI, errorType=stop, flow import + rpa/add."""
+"""Shared custom RPA helpers: RU/EN UI, errorType=stop, flow import + rpa/add."""
 from __future__ import annotations
 
 import json
@@ -27,27 +27,11 @@ def step_wait(ms: int) -> dict:
     }
 
 
-def step_click_text(text: str, search_ms: int = 8000) -> dict:
+def _click_filters(filters: list, search_ms: int = 8000, variable: str = "") -> dict:
     return {
         "type": "click",
         "config": {
-            "filters": [{"content": text, "type": "text"}],
-            "remark": "",
-            "searchTime": search_ms,
-            "serial": 1,
-            "serialMax": 50,
-            "serialMin": 1,
-            "serialType": "fixedValue",
-            "variable": "",
-        },
-    }
-
-
-def step_wait_ele(text: str, search_ms: int = 15000, variable: str = "") -> dict:
-    return {
-        "type": "waitEle",
-        "config": {
-            "filters": [{"content": text, "type": "text"}],
+            "filters": filters,
             "remark": "",
             "searchTime": search_ms,
             "serial": 1,
@@ -57,6 +41,152 @@ def step_wait_ele(text: str, search_ms: int = 15000, variable: str = "") -> dict
             "variable": variable,
         },
     }
+
+
+def _wait_filters(
+    filters: list,
+    search_ms: int = 15000,
+    variable: str = "",
+    *,
+    optional: bool = False,
+) -> dict:
+    config = {
+        "filters": filters,
+        "remark": "",
+        "searchTime": search_ms,
+        "serial": 1,
+        "serialMax": 50,
+        "serialMin": 1,
+        "serialType": "fixedValue",
+        "variable": variable,
+    }
+    if optional:
+        # Probe: missing EN/RU label must not kill the flow (session 294).
+        config["errorType"] = "skip"
+    return {"type": "waitEle", "config": config}
+
+
+def step_click_text(text: str, search_ms: int = 8000) -> dict:
+    return _click_filters([{"content": text, "type": "text"}], search_ms)
+
+
+def step_click_id(element_id: str, search_ms: int = 8000) -> dict:
+    return _click_filters([{"content": element_id, "type": "id"}], search_ms)
+
+
+def step_click_desc(desc: str, search_ms: int = 8000) -> dict:
+    return _click_filters([{"content": desc, "type": "desc"}], search_ms)
+
+
+def step_wait_ele(
+    text: str,
+    search_ms: int = 15000,
+    variable: str = "",
+    *,
+    optional: bool = False,
+) -> dict:
+    return _wait_filters(
+        [{"content": text, "type": "text"}],
+        search_ms,
+        variable,
+        optional=optional,
+    )
+
+
+def step_if_exist(variable: str, then_steps: list, else_steps: list | None = None) -> dict:
+    return {
+        "type": "ifElse",
+        "config": {
+            "children": then_steps,
+            "condition": [variable],
+            "hiddenChildren": False,
+            "other": else_steps or [],
+            "relation": "exist",
+            "remark": "",
+        },
+    }
+
+
+def steps_click_any(
+    *,
+    ids: tuple[str, ...] = (),
+    texts: tuple[str, ...] = (),
+    descs: tuple[str, ...] = (),
+    search_ms: int = 12000,
+    prefix: str = "el",
+) -> list:
+    """Click the first matching control: resource-id, then content-desc, then text.
+
+    Earlier probes are optional so RU/EN can both exist. The last probe is required
+    (errorType=stop on the flow still applies to that click).
+    """
+    probes: list[tuple[str, str]] = (
+        [("id", item) for item in ids]
+        + [("desc", item) for item in descs]
+        + [("text", item) for item in texts]
+    )
+    if not probes:
+        return []
+    last_kind, last_val = probes[-1]
+    acc = [_click_filters([{"content": last_val, "type": last_kind}], search_ms)]
+    for index, (kind, value) in enumerate(reversed(probes[:-1])):
+        variable = f"{prefix}_{index}"
+        probe_ms = min(5000, search_ms)
+        acc = [
+            _wait_filters(
+                [{"content": value, "type": kind}],
+                probe_ms,
+                variable,
+                optional=True,
+            ),
+            step_if_exist(
+                variable,
+                [_click_filters([{"content": value, "type": kind}], search_ms)],
+                acc,
+            ),
+        ]
+    return acc
+
+
+def steps_wait_any(
+    *,
+    texts: tuple[str, ...] = (),
+    ids: tuple[str, ...] = (),
+    search_ms: int = 20000,
+    prefix: str = "wait",
+) -> list:
+    probes: list[tuple[str, str]] = (
+        [("id", item) for item in ids] + [("text", item) for item in texts]
+    )
+    if not probes:
+        return []
+    last_kind, last_val = probes[-1]
+    acc = [_wait_filters([{"content": last_val, "type": last_kind}], search_ms, "")]
+    for index, (kind, value) in enumerate(reversed(probes[:-1])):
+        variable = f"{prefix}_{index}"
+        acc = [
+            _wait_filters(
+                [{"content": value, "type": kind}],
+                min(8000, search_ms),
+                variable,
+                optional=True,
+            ),
+            step_if_exist(variable, [], acc),
+        ]
+    return acc
+
+
+def steps_input_any(placeholders: tuple[str, ...], variable: str, search_ms: int = 8000) -> list:
+    if not placeholders:
+        return []
+    acc = [step_input_variable(placeholders[-1], variable, search_ms)]
+    for index, placeholder in enumerate(reversed(placeholders[:-1])):
+        flag = f"in_{index}"
+        acc = [
+            step_wait_ele(placeholder, min(4000, search_ms), flag, optional=True),
+            step_if_exist(flag, [step_input_variable(placeholder, variable, search_ms)], acc),
+        ]
+    return acc
 
 
 def step_input_variable(placeholder: str, variable: str, search_ms: int = 8000) -> dict:

@@ -4,44 +4,63 @@ from __future__ import annotations
 from publisher.gallery_rpa import (
     add_gallery_rpa_task,
     ensure_flow_id,
-    step_click_text,
     step_close_app,
-    step_input_variable,
     step_open_app,
     step_wait,
-    step_wait_ele,
+    steps_click_any,
+    steps_input_any,
     wrap_flow,
 )
 
 TT_PKG = "com.zhiliaoapp.musically"
-FLOW_TITLE = "VF TikTok gallery"
+FLOW_TITLE = "VF TikTok gallery v2"
 
 
 def build_tiktok_gallery_flow() -> dict:
     contents = [
         step_open_app(TT_PKG),
-        step_wait(4000),
-        step_click_text("Create"),
+        step_wait(5000),
+        *steps_click_any(
+            texts=("Create", "Создать", "+"),
+            prefix="tt_create",
+            search_ms=10000,
+        ),
         step_wait(2000),
-        step_click_text("Upload"),
+        *steps_click_any(
+            texts=("Upload", "Загрузить"),
+            prefix="tt_upload",
+            search_ms=8000,
+        ),
         step_wait(3000),
-        step_wait_ele("Next", search_ms=20000),
-        step_click_text("Next", search_ms=20000),
+        *steps_click_any(
+            texts=("Next", "Далее"),
+            prefix="tt_next1",
+            search_ms=20000,
+        ),
         step_wait(2000),
-        step_wait_ele("Next", search_ms=20000),
-        step_click_text("Next", search_ms=20000),
+        *steps_click_any(
+            texts=("Next", "Далее"),
+            prefix="tt_next2",
+            search_ms=20000,
+        ),
         step_wait(2000),
-        step_input_variable("Add a description", "Desc"),
+        *steps_input_any(
+            ("Add a description", "Добавьте описание", "Описание"),
+            "Desc",
+        ),
         step_wait(1000),
-        step_wait_ele("Post", search_ms=30000),
-        step_click_text("Post", search_ms=15000),
+        *steps_click_any(
+            texts=("Post", "Опубликовать"),
+            prefix="tt_post",
+            search_ms=15000,
+        ),
         step_wait(8000),
         step_close_app(TT_PKG),
     ]
     return wrap_flow(
         contents,
         title=FLOW_TITLE,
-        desc="Video Farm: TikTok from gallery, fail if Next/Post missing",
+        desc="Video Farm: TikTok from gallery, RU/EN, fail if Next/Post missing",
     )
 
 

@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from publisher.gallery_phone import (
     GALLERY_REMOTE_PATH,
+    ensure_phone_running,
     ensure_resource_on_gallery,
     gallery_publish_mode_enabled,
     reset_gallery_push_cache,
@@ -34,10 +35,10 @@ class GalleryModeTests(SimpleTestCase):
         self.assertFalse(gallery_publish_mode_enabled())
         self.assertFalse(youtube_gallery_mode_enabled())
 
-    def test_stock_is_settings_default(self):
-        from django.conf import settings as dj
-        self.assertEqual(str(dj.GEELARK_PUBLISH_MODE).strip().lower(), "stock")
-        self.assertFalse(gallery_publish_mode_enabled())
+    @override_settings(GEELARK_PUBLISH_MODE="", GEELARK_YOUTUBE_PUBLISH_MODE="")
+    def test_unset_mode_defaults_to_gallery(self):
+        self.assertTrue(gallery_publish_mode_enabled())
+        self.assertTrue(youtube_gallery_mode_enabled())
 
     @override_settings(GEELARK_PUBLISH_MODE="gallery")
     def test_gallery_opt_in(self):
@@ -52,6 +53,10 @@ class YoutubeGalleryFlowTests(SimpleTestCase):
         dumped = str(content)
         self.assertIn("Upload Short", dumped)
         self.assertIn("Next", dumped)
+        self.assertIn("Далее", dumped)
+        self.assertIn("Создать", dumped)
+        self.assertIn("Галерея", dumped)
+        self.assertIn("shorts_camera_next_button", dumped)
         self.assertIn("Uploaded to Your Videos", dumped)
         self.assertNotIn("120000", dumped)
 
@@ -87,6 +92,8 @@ class TikTokInstagramFlowTests(SimpleTestCase):
         dumped = str(flow)
         self.assertIn("Upload", dumped)
         self.assertIn("Post", dumped)
+        self.assertIn("Опубликовать", dumped)
+        self.assertIn("Далее", dumped)
         self.assertIn("com.zhiliaoapp.musically", dumped)
 
     def test_instagram_flow_stops_on_share(self):
@@ -94,6 +101,7 @@ class TikTokInstagramFlowTests(SimpleTestCase):
         self.assertEqual(flow["content"]["errorType"], "stop")
         dumped = str(flow)
         self.assertIn("Share", dumped)
+        self.assertIn("Поделиться", dumped)
         self.assertIn("com.instagram.android", dumped)
 
     @patch("publisher.gallery_rpa.ensure_resource_on_gallery")
@@ -147,6 +155,33 @@ class PhoneUploadTests(SimpleTestCase):
         self.assertEqual(first, second)
         self.assertEqual(upload.call_count, 2)
         self.assertEqual(other, GALLERY_REMOTE_PATH)
+
+
+class PhoneBootTests(SimpleTestCase):
+    @patch("publisher.gallery_phone.time.sleep")
+    @patch("publisher.gallery_phone.start_cloud_phone")
+    @patch("publisher.gallery_phone.check_phone_status")
+    def test_starting_phone_waits_instead_of_failing_start(self, status, start, _sleep):
+        status.side_effect = [
+            {"is_running": False, "status": 1},
+            {"is_running": False, "status": 1},
+            {"is_running": True, "status": 0},
+        ]
+        ensure_phone_running("env-1")
+        start.assert_not_called()
+        self.assertGreaterEqual(status.call_count, 3)
+
+    @patch("publisher.gallery_phone.time.sleep")
+    @patch("publisher.gallery_phone.start_cloud_phone", side_effect=RuntimeError("busy"))
+    @patch("publisher.gallery_phone.check_phone_status")
+    def test_start_error_still_waits_if_phone_is_starting(self, status, start, _sleep):
+        status.side_effect = [
+            {"is_running": False, "status": 2},
+            {"is_running": False, "status": 1},
+            {"is_running": True, "status": 0},
+        ]
+        ensure_phone_running("env-1")
+        start.assert_called_once_with("env-1")
 
 
 class AddTaskRoutingTests(SimpleTestCase):
