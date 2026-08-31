@@ -76,6 +76,19 @@ class YoutubeRpaVerifyTests(SimpleTestCase):
         ]
         self.assertFalse(youtube_rpa_is_false_success(logs))
 
+
+    def test_next_click_fail_then_post_button_is_success(self):
+        """Working stock path: Next Click-failed, then shorts_post_bottom_button."""
+        logs = [
+            "Click element: Selector: id：com.google.android.youtube:id/shorts_camera_next_button",
+            "Click failed, please check whether the element exists:",
+            "Click element: Selector: id：com.google.android.youtube:id/shorts_post_bottom_button",
+            "Wait for element to appear: Selector: text：Uploaded to Your Videos",
+            "Run successfully:",
+        ]
+        self.assertFalse(youtube_rpa_is_false_success(logs))
+        self.assertEqual(classify_completed_rpa("YouTube", logs), "success")
+
     def test_resolve_completed_status_maps_fields(self):
         from publisher.rpa_verify import FAKE_SUCCESS_FAIL_CODE, resolve_completed_status
 

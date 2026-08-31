@@ -124,12 +124,12 @@ GEELARK_DISPATCH_LEAD_SECONDS = int(os.environ.get('GEELARK_DISPATCH_LEAD_SECOND
 # sending без geelark_task_id дольше этого → зомби (не блокирует телефон)
 GEELARK_SENDING_ZOMBIE_SECONDS = int(os.environ.get('GEELARK_SENDING_ZOMBIE_SECONDS', '600'))
 
-# gallery = phone/uploadFile → Downloads + свой RPA (дефолт).
-# stock = штатные youtubePubShort / TikTok task/add.
+# stock = штатные youtubePubShort / TikTok task/add (дефолт, путь 2099–2110).
+# gallery = phone/uploadFile + свой RPA (opt-in; на проде 31.08 не выкладывал).
 GEELARK_PUBLISH_MODE = (
     os.environ.get('GEELARK_PUBLISH_MODE')
     or os.environ.get('GEELARK_YOUTUBE_PUBLISH_MODE')
-    or 'gallery'
+    or 'stock'
 )
 GEELARK_YOUTUBE_PUBLISH_MODE = GEELARK_PUBLISH_MODE
 GEELARK_YOUTUBE_GALLERY_FLOW_ID = os.environ.get('GEELARK_YOUTUBE_GALLERY_FLOW_ID', '').strip()
@@ -137,7 +137,7 @@ GEELARK_TIKTOK_GALLERY_FLOW_ID = os.environ.get('GEELARK_TIKTOK_GALLERY_FLOW_ID'
 GEELARK_INSTAGRAM_GALLERY_FLOW_ID = os.environ.get('GEELARK_INSTAGRAM_GALLERY_FLOW_ID', '').strip()
 GEELARK_PHONE_BOOT_WAIT_SEC = int(
     os.environ.get('GEELARK_PHONE_BOOT_WAIT_SEC')
-    or os.environ.get('GEELARK_ADB_BOOT_WAIT_SEC', '90')
+    or os.environ.get('GEELARK_ADB_BOOT_WAIT_SEC', '180')
 )
 _verify_rpa = os.environ.get('GEELARK_VERIFY_RPA') or os.environ.get(
     'GEELARK_VERIFY_YOUTUBE_RPA', '1'

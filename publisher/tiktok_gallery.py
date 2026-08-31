@@ -13,7 +13,7 @@ from publisher.gallery_rpa import (
 )
 
 TT_PKG = "com.zhiliaoapp.musically"
-FLOW_TITLE = "VF TikTok gallery v2"
+FLOW_TITLE = "VF TikTok gallery v3"
 
 
 def build_tiktok_gallery_flow() -> dict:

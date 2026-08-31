@@ -24,11 +24,11 @@ _pushed: dict[tuple[str, str], str] = {}
 
 
 def gallery_publish_mode_enabled() -> bool:
-    """Default is gallery: phone/uploadFile + custom RPA. stock = youtubePubShort."""
+    """Opt-in. Default is stock youtubePubShort / TikTok task/add."""
     raw = (
         getattr(settings, "GEELARK_PUBLISH_MODE", None)
         or getattr(settings, "GEELARK_YOUTUBE_PUBLISH_MODE", None)
-        or "gallery"
+        or "stock"
     )
     return str(raw).strip().lower() == "gallery"
 
@@ -43,7 +43,7 @@ def reset_gallery_push_cache() -> None:
 
 
 def _boot_wait_sec() -> int:
-    return max(5, int(getattr(settings, "GEELARK_PHONE_BOOT_WAIT_SEC", 45)))
+    return max(5, int(getattr(settings, "GEELARK_PHONE_BOOT_WAIT_SEC", 180)))
 
 
 def _upload_wait_sec() -> int:
@@ -78,14 +78,35 @@ def ensure_phone_running(env_id: str) -> None:
             if not (info and (info.get("is_running") or info.get("status") == 1)):
                 raise RuntimeError(f"phone start failed: {exc}") from exc
 
-    deadline = time.time() + _boot_wait_sec()
-    while time.time() < deadline:
-        info = check_phone_status(env_id)
-        if info.get("is_running"):
-            time.sleep(3)
-            return
-        time.sleep(2)
-    raise RuntimeError(f"Cloud phone {env_id} did not reach Started")
+    last = info or {}
+    wait_sec = _boot_wait_sec()
+    deadline = time.time() + wait_sec
+    extended = False
+    while True:
+        while time.time() < deadline:
+            last = check_phone_status(env_id)
+            if last.get("is_running"):
+                time.sleep(3)
+                return
+            time.sleep(2)
+        # Session 304: start() returned in 1s, Started took >90s. Keep waiting
+        # once more while GeeLark still reports Starting.
+        if not extended and last.get("status") == 1:
+            logger.info(
+                "phone %s still Starting after %ss, waiting another %ss",
+                env_id,
+                wait_sec,
+                wait_sec,
+            )
+            extended = True
+            deadline = time.time() + wait_sec
+            continue
+        break
+    status = last.get("status")
+    text = last.get("status_text") or status
+    raise RuntimeError(
+        f"Cloud phone {env_id} did not reach Started (status={text})"
+    )
 
 
 def _wait_upload_file_result(task_id: str) -> None:

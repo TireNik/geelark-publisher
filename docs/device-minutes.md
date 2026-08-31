@@ -18,4 +18,4 @@
 Ложный success и gallery (2026-08-28):
 
 - `status=3` штатного шаблона не равен «ролик выложен»: Click failed на Next / Upload / Post / Share → publisher пишет `error` (код 20212), `stop_phone_if_idle`. Флаг `GEELARK_VERIFY_RPA` (default on), все сети.
-- Дефолт `GEELARK_PUBLISH_MODE=gallery`: `phone/uploadFile` в Downloads + свой RPA (RU/EN, Next по `shorts_camera_next_button`). Откат: `stock` = `youtubePubShort` / TikTok `task/add`. Ложный success: Click failed **или** No element found на Next/Upload/Post → `error` 20212. Boot wait 90 с, не падаем если телефон уже Starting. Таймаут 8 мин и `phone_guard` без изменений.
+- Дефолт снова `GEELARK_PUBLISH_MODE=stock` (`youtubePubShort` / TikTok `task/add`): gallery custom RPA 2026-08-31 не находил Create/Gallery/Next/Post (20212 на 2111–2120). Gallery остаётся opt-in. Ложный success: Click failed **или** No element found на Next/Upload/Post → `error` 20212, кроме рабочего stock-пути с `shorts_post_bottom_button`. Таймаут 8 мин и `phone_guard` без изменений.

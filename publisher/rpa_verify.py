@@ -2,6 +2,12 @@
 
 Stock youtubePubShort (taskType 42) and custom gallery flows can Click-fail
 on Next / Upload / Post, then still return status=3.
+
+Working prod (other developer, bak .bak-gallery-20260831-124817): YouTube is
+success if after a Next Click-failed the flow still clicks
+shorts_post_bottom_button without Click failed. Tasks 2099–2110 landed on
+the channel that way. Keep that recovery; also treat No element found on
+publish controls as a miss unless the post button succeeded later.
 """
 from __future__ import annotations
 
@@ -26,13 +32,33 @@ _PUBLISH_MARKERS = (
     "опубликовать",
     "shorts_camera_next_button",
     "multi_select_next_button",
+    "shorts_post_bottom_button",
 )
+_POST_BUTTON_MARKERS = (
+    "shorts_post_bottom_button",
+)
+
+
+def _has_successful_post_after(lines, failed_index: int) -> bool:
+    """True when YouTube still posted via shorts_post_bottom_button (working stock)."""
+    for index in range(failed_index + 1, len(lines)):
+        line = lines[index]
+        lower = line.lower()
+        if "click element" not in lower or not any(
+            marker in lower for marker in _POST_BUTTON_MARKERS
+        ):
+            continue
+        nearby = "\n".join(lines[index : index + 2])
+        if CLICK_FAILED not in nearby and NO_ELEMENT not in nearby:
+            return True
+    return False
 
 
 def rpa_is_false_success(logs) -> bool:
     """True when Next / Upload / Post / Share was missing or the click failed.
 
     GeeLark still returns status=3 / Run successfully in both cases.
+    Exception: Next failed but shorts_post_bottom_button click succeeded.
     """
     lines = [str(item) for item in (logs or [])]
     for index, line in enumerate(lines):
@@ -40,6 +66,8 @@ def rpa_is_false_success(logs) -> bool:
             continue
         window = "\n".join(lines[max(0, index - 6) : index + 1]).lower()
         if any(marker in window for marker in _PUBLISH_MARKERS):
+            if _has_successful_post_after(lines, index):
+                continue
             return True
     return False
 

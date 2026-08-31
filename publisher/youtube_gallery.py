@@ -14,18 +14,23 @@ from publisher.gallery_rpa import (
 )
 
 YT_PKG = "com.google.android.youtube"
-FLOW_TITLE = "VF YouTube gallery Short v2"
+FLOW_TITLE = "VF YouTube gallery Short v4"
 NEXT_IDS = (
     "shorts_camera_next_button",
     "com.google.android.youtube:id/shorts_camera_next_button",
     "multi_select_next_button",
+)
+# Working stock youtubePubShort (tasks 2099–2110): this is the real Post.
+POST_IDS = (
+    "shorts_post_bottom_button",
+    "com.google.android.youtube:id/shorts_post_bottom_button",
 )
 
 
 def build_youtube_gallery_flow() -> dict:
     contents = [
         step_open_app(YT_PKG),
-        step_wait(5000),
+        step_wait(8000),
         *steps_click_any(
             ids=("com.google.android.youtube:id/reel_camera_button",),
             descs=("Create a video or post", "Create"),
@@ -71,6 +76,7 @@ def build_youtube_gallery_flow() -> dict:
         ),
         step_wait(1000),
         *steps_click_any(
+            ids=POST_IDS,
             texts=("Upload Short", "Загрузить Short", "Опубликовать", "Upload"),
             prefix="yt_upload",
             search_ms=15000,
@@ -89,7 +95,7 @@ def build_youtube_gallery_flow() -> dict:
     return wrap_flow(
         contents,
         title=FLOW_TITLE,
-        desc="Video Farm: YouTube Short from gallery, RU/EN + Next resource-id, stop on miss",
+        desc="Video Farm: YouTube Short from gallery; Post via shorts_post_bottom_button",
     )
 
 

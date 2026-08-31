@@ -13,7 +13,7 @@ from publisher.gallery_rpa import (
 )
 
 IG_PKG = "com.instagram.android"
-FLOW_TITLE = "VF Instagram gallery Reel v2"
+FLOW_TITLE = "VF Instagram gallery Reel v3"
 
 
 def build_instagram_gallery_flow() -> dict:

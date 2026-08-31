@@ -36,9 +36,9 @@ class GalleryModeTests(SimpleTestCase):
         self.assertFalse(youtube_gallery_mode_enabled())
 
     @override_settings(GEELARK_PUBLISH_MODE="", GEELARK_YOUTUBE_PUBLISH_MODE="")
-    def test_unset_mode_defaults_to_gallery(self):
-        self.assertTrue(gallery_publish_mode_enabled())
-        self.assertTrue(youtube_gallery_mode_enabled())
+    def test_unset_mode_defaults_to_stock(self):
+        self.assertFalse(gallery_publish_mode_enabled())
+        self.assertFalse(youtube_gallery_mode_enabled())
 
     @override_settings(GEELARK_PUBLISH_MODE="gallery")
     def test_gallery_opt_in(self):
@@ -57,8 +57,18 @@ class YoutubeGalleryFlowTests(SimpleTestCase):
         self.assertIn("Создать", dumped)
         self.assertIn("Галерея", dumped)
         self.assertIn("shorts_camera_next_button", dumped)
+        self.assertIn("shorts_post_bottom_button", dumped)
         self.assertIn("Uploaded to Your Videos", dumped)
         self.assertNotIn("120000", dumped)
+        self.assertNotIn("ifElse", dumped)
+        clicks = [step for step in content["contents"] if step.get("type") == "click"]
+        gallery = next(
+            step
+            for step in clicks
+            if any(item.get("content") == "Галерея" for item in step["config"]["filters"])
+        )
+        labels = {item["content"] for item in gallery["config"]["filters"]}
+        self.assertIn("Gallery", labels)
 
     @override_settings(GEELARK_YOUTUBE_GALLERY_FLOW_ID="flow-fixed")
     def test_configured_flow_id_skips_import(self):
@@ -182,6 +192,48 @@ class PhoneBootTests(SimpleTestCase):
         ]
         ensure_phone_running("env-1")
         start.assert_called_once_with("env-1")
+
+    @override_settings(GEELARK_PHONE_BOOT_WAIT_SEC=10)
+    @patch("publisher.gallery_phone.start_cloud_phone")
+    @patch("publisher.gallery_phone.check_phone_status")
+    def test_still_starting_extends_wait(self, status, start):
+        clock = {"now": 0.0}
+
+        def fake_time():
+            return clock["now"]
+
+        def fake_sleep(seconds):
+            clock["now"] += float(seconds)
+
+        starting = {"is_running": False, "status": 1, "status_text": "Запускается"}
+        status.side_effect = [starting] * 8 + [{"is_running": True, "status": 0}]
+        with patch("publisher.gallery_phone.time.time", side_effect=fake_time):
+            with patch("publisher.gallery_phone.time.sleep", side_effect=fake_sleep):
+                ensure_phone_running("env-1")
+        self.assertGreaterEqual(clock["now"], 10)
+
+    @override_settings(GEELARK_PHONE_BOOT_WAIT_SEC=10)
+    @patch("publisher.gallery_phone.start_cloud_phone")
+    @patch("publisher.gallery_phone.check_phone_status")
+    def test_timeout_includes_last_status(self, status, start):
+        clock = {"now": 0.0}
+
+        def fake_time():
+            return clock["now"]
+
+        def fake_sleep(seconds):
+            clock["now"] += float(seconds)
+
+        status.return_value = {
+            "is_running": False,
+            "status": 2,
+            "status_text": "Выключен",
+        }
+        with patch("publisher.gallery_phone.time.time", side_effect=fake_time):
+            with patch("publisher.gallery_phone.time.sleep", side_effect=fake_sleep):
+                with self.assertRaises(RuntimeError) as ctx:
+                    ensure_phone_running("env-1")
+        self.assertIn("status=Выключен", str(ctx.exception))
 
 
 class AddTaskRoutingTests(SimpleTestCase):
