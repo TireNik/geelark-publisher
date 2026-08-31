@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from .retry import RetryExternalView
 
 app_name = 'publisher'
 
@@ -8,6 +9,7 @@ urlpatterns = [
     path('api/upload/', views.ExcelUploadView.as_view(), name='api_upload'),
     path('api/ingest/test/', views.JsonIngestTestView.as_view(), name='api_ingest_test'),
     path('api/ingest/', views.JsonIngestView.as_view(), name='api_ingest'),
+    path('api/retry/', RetryExternalView.as_view(), name='api_retry'),
     path('api/status/<int:session_id>/', views.TaskStatusAPIView.as_view(), name='api_status'),
     path('api/status/<int:session_id>/sync-geelark/', views.GeeLarkTaskStatusSyncAPIView.as_view(), name='api_sync_geelark'),
     path('api/sessions/', views.SessionsListAPIView.as_view(), name='api_sessions'),

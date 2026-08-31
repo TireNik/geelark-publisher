@@ -34,6 +34,28 @@ def _token_ok(provided: str, expected: str) -> bool:
     return hmac.compare_digest(left, right)
 
 
+def ingest_auth_error(request):
+    """None if the VF ingest token is valid; otherwise a 401/503 Response."""
+    expected = ingest_token()
+    if not expected:
+        return Response(
+            {'success': False, 'error': 'ingest disabled: VF_INGEST_TOKEN empty'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    provided = ''
+    for header in INGEST_HEADERS:
+        value = request.headers.get(header) or ''
+        if value:
+            provided = value
+            break
+    if not _token_ok(provided, expected):
+        return Response(
+            {'success': False, 'error': 'invalid token'},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+    return None
+
+
 def parse_ingest_item(raw: dict, index: int) -> tuple[dict | None, dict | None]:
     if not isinstance(raw, dict):
         return None, {'index': index, 'error': 'item must be an object'}
@@ -105,23 +127,9 @@ class JsonIngestView(APIView):
     force_dry_run = False
 
     def post(self, request):
-        expected = ingest_token()
-        if not expected:
-            return Response(
-                {'success': False, 'error': 'ingest disabled: VF_INGEST_TOKEN empty'},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-        provided = ''
-        for header in INGEST_HEADERS:
-            value = request.headers.get(header) or ''
-            if value:
-                provided = value
-                break
-        if not _token_ok(provided, expected):
-            return Response(
-                {'success': False, 'error': 'invalid token'},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
+        auth_error = ingest_auth_error(request)
+        if auth_error is not None:
+            return auth_error
 
         body = request.data if isinstance(request.data, dict) else {}
         items = body.get('items') or []
